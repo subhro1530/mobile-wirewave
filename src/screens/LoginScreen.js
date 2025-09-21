@@ -6,7 +6,12 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
+  SafeAreaView,
+  Platform,
+  StatusBar,
+  Image,
 } from "react-native";
+import Icon from "react-native-vector-icons/MaterialIcons";
 import { AuthContext } from "../AuthContext";
 
 export default function LoginScreen({ navigation }) {
@@ -38,8 +43,13 @@ export default function LoginScreen({ navigation }) {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>WireWave</Text>
+    <SafeAreaView style={styles.container}>
+      {/* Logo */}
+      <Image
+        source={require("../../assets/logo.png")}
+        style={styles.logo}
+        resizeMode="contain"
+      />
       <TextInput
         style={styles.input}
         placeholder="Email"
@@ -55,13 +65,23 @@ export default function LoginScreen({ navigation }) {
         onChangeText={setPassword}
         value={password}
       />
-      <TouchableOpacity style={styles.button} onPress={handleLogin}>
-        <Text style={styles.buttonText}>Log In</Text>
+      <TouchableOpacity
+        style={styles.actionButton}
+        onPress={handleLogin}
+        accessibilityLabel="Log in"
+      >
+        <Icon name="login" size={24} color="#fff" />
+        <Text style={styles.actionButtonText}>Login</Text>
       </TouchableOpacity>
-      <TouchableOpacity onPress={() => navigation.navigate("Register")}>
-        <Text style={styles.link}>Don't have an account? Register</Text>
+      <TouchableOpacity
+        onPress={() => navigation.navigate("Register")}
+        style={styles.linkButton}
+        accessibilityLabel="Go to register"
+      >
+        <Icon name="person-add-alt" size={20} color="#aaa" />
+        <Text style={styles.linkButtonText}>Register</Text>
       </TouchableOpacity>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -72,12 +92,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     padding: 20,
+    paddingTop:
+      (Platform.OS === "android" ? StatusBar.currentHeight || 0 : 0) + 12,
+    paddingBottom: 16,
   },
-  title: {
-    fontSize: 32,
-    color: "#fff",
-    marginBottom: 40,
-    fontWeight: "bold",
+  logo: {
+    width: 140,
+    height: 140,
+    marginBottom: 30,
   },
   input: {
     width: "100%",
@@ -87,20 +109,29 @@ const styles = StyleSheet.create({
     color: "#fff",
     marginBottom: 15,
   },
-  button: {
-    width: "100%",
-    backgroundColor: "#4a90e2",
-    padding: 15,
-    borderRadius: 10,
-    marginBottom: 10,
+  actionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#3a7afe",
+    paddingHorizontal: 24,
+    height: 56,
+    borderRadius: 28,
+    marginTop: 6,
   },
-  buttonText: {
+  actionButtonText: {
     color: "#fff",
-    textAlign: "center",
-    fontWeight: "bold",
+    fontWeight: "600",
+    fontSize: 16,
+    marginLeft: 10,
   },
-  link: {
+  linkButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 14,
+  },
+  linkButtonText: {
     color: "#aaa",
-    marginTop: 10,
+    fontSize: 14,
+    marginLeft: 6,
   },
 });

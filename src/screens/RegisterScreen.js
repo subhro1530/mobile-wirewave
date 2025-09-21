@@ -6,7 +6,12 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
+  SafeAreaView,
+  Platform,
+  StatusBar,
+  Image,
 } from "react-native";
+import Icon from "react-native-vector-icons/MaterialIcons";
 
 export default function RegisterScreen({ navigation }) {
   const [email, setEmail] = useState("");
@@ -36,8 +41,12 @@ export default function RegisterScreen({ navigation }) {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Create Account</Text>
+    <SafeAreaView style={styles.container}>
+      <Image
+        source={require("../../assets/logo.png")}
+        style={styles.logo}
+        resizeMode="contain"
+      />
       <TextInput
         style={styles.input}
         placeholder="Email"
@@ -53,13 +62,23 @@ export default function RegisterScreen({ navigation }) {
         onChangeText={setPassword}
         value={password}
       />
-      <TouchableOpacity style={styles.button} onPress={handleRegister}>
-        <Text style={styles.buttonText}>Register</Text>
+      <TouchableOpacity
+        style={styles.actionButton}
+        onPress={handleRegister}
+        accessibilityLabel="Create account"
+      >
+        <Icon name="check-circle" size={24} color="#fff" />
+        <Text style={styles.actionButtonText}>Register</Text>
       </TouchableOpacity>
-      <TouchableOpacity onPress={() => navigation.navigate("Login")}>
-        <Text style={styles.link}>Already have an account? Log In</Text>
+      <TouchableOpacity
+        onPress={() => navigation.navigate("Login")}
+        style={styles.linkButton}
+        accessibilityLabel="Back to login"
+      >
+        <Icon name="login" size={20} color="#aaa" />
+        <Text style={styles.linkButtonText}>Login</Text>
       </TouchableOpacity>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -70,12 +89,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     padding: 20,
+    paddingTop:
+      (Platform.OS === "android" ? StatusBar.currentHeight || 0 : 0) + 12,
+    paddingBottom: 16,
   },
-  title: {
-    fontSize: 32,
-    color: "#fff",
-    marginBottom: 40,
-    fontWeight: "bold",
+  logo: {
+    width: 140,
+    height: 140,
+    marginBottom: 30,
   },
   input: {
     width: "100%",
@@ -85,17 +106,30 @@ const styles = StyleSheet.create({
     color: "#fff",
     marginBottom: 15,
   },
-  button: {
-    width: "100%",
-    backgroundColor: "#4a90e2",
-    padding: 15,
-    borderRadius: 10,
-    marginBottom: 10,
+  actionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#3a7afe",
+    paddingHorizontal: 24,
+    height: 56,
+    borderRadius: 28,
+    marginTop: 6,
   },
-  buttonText: {
+  actionButtonText: {
     color: "#fff",
-    textAlign: "center",
-    fontWeight: "bold",
+    fontWeight: "600",
+    fontSize: 16,
+    marginLeft: 10,
+  },
+  linkButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 14,
+  },
+  linkButtonText: {
+    color: "#aaa",
+    fontSize: 14,
+    marginLeft: 6,
   },
   link: {
     color: "#aaa",

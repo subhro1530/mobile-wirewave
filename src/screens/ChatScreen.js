@@ -6,15 +6,21 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   Text,
+  SafeAreaView,
+  Platform,
+  StatusBar,
+  KeyboardAvoidingView,
+  Image, // added
 } from "react-native";
-import { TextInput, Button } from "react-native-paper";
+import { TextInput } from "react-native-paper";
 import API from "../api";
 import ContactList from "../components/ContactList";
 import ChatWindow from "../components/ChatWindow";
 import { AuthContext } from "../AuthContext";
+import Icon from "react-native-vector-icons/MaterialIcons";
 
 export default function ChatScreen() {
-  const { userEmail } = useContext(AuthContext);
+  const { userEmail, logout } = useContext(AuthContext);
   const [messages, setMessages] = useState([]);
   const [activeContact, setActiveContact] = useState(null);
   const [text, setText] = useState("");
@@ -86,81 +92,128 @@ export default function ChatScreen() {
   }, [activeContact, isWide]);
 
   return (
-    <View style={styles.root}>
-      {/* Contacts Panel */}
-      {(isWide || showContacts) && (
-        <View style={[styles.contactsPane, !isWide && styles.overlay]}>
-          {!isWide && activeContact && (
-            <TouchableOpacity
-              style={styles.closeOverlay}
-              onPress={() => setShowContacts(false)}
-            >
-              <Text style={{ color: "#fff", fontWeight: "600" }}>Close</Text>
-            </TouchableOpacity>
+    <SafeAreaView style={styles.safeArea}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : "padding"} // changed: use padding on Android too
+        keyboardVerticalOffset={
+          Platform.OS === "android" ? StatusBar.currentHeight || 0 : 0
+        }
+      >
+        <View style={styles.root}>
+          {/* Contacts Panel */}
+          {(isWide || showContacts) && (
+            <View style={[styles.contactsPane, !isWide && styles.overlay]}>
+              {!isWide && activeContact && (
+                <TouchableOpacity
+                  style={styles.closeOverlay}
+                  onPress={() => setShowContacts(false)}
+                  accessibilityLabel="Close contacts panel"
+                >
+                  <Image
+                    source={require("../../assets/icon.png")}
+                    style={styles.closeIcon}
+                    resizeMode="contain"
+                  />
+                </TouchableOpacity>
+              )}
+              <ContactList
+                messages={messages}
+                currentUserEmail={userEmail}
+                onSelect={(email) => {
+                  setActiveContact(email);
+                  if (!isWide) setShowContacts(false);
+                }}
+                onClose={() => setShowContacts(false)}
+              />
+            </View>
           )}
-          <ContactList
-            messages={messages}
-            currentUserEmail={userEmail}
-            onSelect={(email) => {
-              setActiveContact(email);
-              if (!isWide) setShowContacts(false);
-            }}
-            onClose={() => setShowContacts(false)}
-          />
-        </View>
-      )}
 
-      {/* Chat Pane */}
-      <View style={styles.chatPane}>
-        {!isWide && !showContacts && (
-          <TouchableOpacity
-            style={styles.backBtn}
-            onPress={() => setShowContacts(true)}
-          >
-            <Text style={styles.backTxt}>Contacts</Text>
-          </TouchableOpacity>
-        )}
-        <ChatWindow
-          activeContact={activeContact}
-          messages={filtered}
-          currentUserEmail={userEmail}
-          onRefresh={loadMessages}
-          onClear={clearChat}
-        />
-        {!!error && (
-          <Text
-            style={{ color: "#f55", paddingHorizontal: 12, paddingBottom: 4 }}
-          >
-            {error}
-          </Text>
-        )}
-        {activeContact && (
-          <View style={styles.composer}>
-            <TextInput
-              value={text}
-              mode="flat"
-              onChangeText={setText}
-              placeholder="Type a message"
-              style={styles.input}
-              underlineColor="transparent"
-              placeholderTextColor="#777"
+          {/* Chat Pane */}
+          <View style={styles.chatPane}>
+            {/* Header bar with toggle + logout */}
+            <View style={styles.headerBar}>
+              {!isWide && !showContacts && (
+                <TouchableOpacity
+                  style={styles.iconBtn}
+                  onPress={() => setShowContacts(true)}
+                >
+                  <Icon name="menu" size={22} color="#fff" />
+                </TouchableOpacity>
+              )}
+              <View style={{ flex: 1 }} />
+              <TouchableOpacity style={styles.iconBtn} onPress={logout}>
+                <Icon name="logout" size={22} color="#fff" />
+              </TouchableOpacity>
+            </View>
+            {/* Chat window */}
+            <ChatWindow
+              activeContact={activeContact}
+              messages={filtered}
+              currentUserEmail={userEmail}
+              onRefresh={loadMessages}
+              onClear={clearChat}
             />
-            <Button
-              mode="contained"
-              onPress={sendMessage}
-              disabled={!text.trim() || loading}
-              style={styles.send}
-            >
-              {loading ? <ActivityIndicator color="#fff" /> : "Send"}
-            </Button>
+            {!!error && (
+              <Text
+                style={{
+                  color: "#f55",
+                  paddingHorizontal: 12,
+                  paddingBottom: 4,
+                }}
+              >
+                {error}
+              </Text>
+            )}
+            {activeContact && (
+              <View style={styles.composer}>
+                <TextInput
+                  value={text}
+                  mode="flat"
+                  onChangeText={setText}
+                  placeholder="Type a message here..."
+                  placeholderTextColor="#777"
+                  textColor="#fff"
+                  theme={{
+                    colors: {
+                      primary: "#3a7afe",
+                      background: "#222",
+                      surface: "#222",
+                      onSurface: "#fff",
+                      text: "#fff",
+                    },
+                  }}
+                  style={styles.input}
+                  underlineColor="transparent"
+                />
+                <TouchableOpacity
+                  style={styles.sendBtn}
+                  disabled={!text.trim() || loading}
+                  onPress={sendMessage}
+                  accessibilityLabel="Send message"
+                >
+                  {loading ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Icon name="send" size={18} color="#fff" />
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
-        )}
-      </View>
-    </View>
+        </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: "#101010",
+    paddingTop: Platform.OS === "android" ? StatusBar.currentHeight || 0 : 0,
+    paddingBottom: 0,
+  },
   root: { flex: 1, flexDirection: "row", backgroundColor: "#101010" },
   contactsPane: {
     width: 300,
@@ -186,24 +239,54 @@ const styles = StyleSheet.create({
     borderBottomColor: "#222",
     borderBottomWidth: StyleSheet.hairlineWidth,
     backgroundColor: "#1d1d1d",
+    alignItems: "flex-end",
+  },
+  closeIcon: {
+    width: 18,
+    height: 18,
+    tintColor: "#fff",
   },
   chatPane: { flex: 1 },
-  composer: {
+  headerBar: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 10,
     paddingVertical: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#222",
-    backgroundColor: "#161616",
-  },
-  input: { flex: 1, backgroundColor: "#222", color: "#fff", marginRight: 8 },
-  send: { borderRadius: 8 },
-  backBtn: {
-    padding: 10,
     backgroundColor: "#161616",
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "#222",
   },
-  backTxt: { color: "#3a7afe", fontWeight: "600" },
+  iconBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#1f1f1f",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 8,
+  },
+  composer: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 4, // slightly reduced
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#222",
+    backgroundColor: "#161616",
+  },
+  input: {
+    flex: 1,
+    backgroundColor: "#222",
+    color: "#fff",
+    paddingHorizontal: 10,
+    height: 40, // tighter field
+  },
+  sendBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#3a7afe",
+    alignItems: "center",
+    justifyContent: "center",
+  },
 });

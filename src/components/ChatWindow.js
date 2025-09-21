@@ -1,6 +1,6 @@
 // components/ChatWindow.js
 import React, { useEffect, useRef } from "react";
-import { View, FlatList, Text, StyleSheet } from "react-native";
+import { View, FlatList, Text, StyleSheet, Image } from "react-native";
 import MessageBubble from "./MessageBubble";
 
 function groupByDate(list) {
@@ -38,7 +38,12 @@ export default function ChatWindow({
   if (!activeContact) {
     return (
       <View style={styles.placeholder}>
-        <Text style={styles.placeholderTitle}>WireWave</Text>
+        <Image
+          source={require("../../assets/logo.png")}
+          /* logo image */
+          style={styles.placeholderLogo}
+          resizeMode="contain"
+        />
         <Text style={styles.placeholderSub}>
           Select or start a conversation
         </Text>
@@ -99,7 +104,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "#121212",
   },
-  placeholderTitle: { color: "#fff", fontSize: 24, fontWeight: "700" },
+  placeholderLogo: {
+    width: 160,
+    height: 160,
+    marginBottom: 12,
+  },
   placeholderSub: { color: "#777", marginTop: 6 },
   emptyThread: { position: "absolute", top: 20, alignSelf: "center" },
 });
