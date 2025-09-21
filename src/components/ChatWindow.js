@@ -30,9 +30,14 @@ export default function ChatWindow({
   const grouped = groupByDate(messages || []);
 
   useEffect(() => {
-    if (flatRef.current) {
-      setTimeout(() => flatRef.current.scrollToEnd({ animated: true }), 60);
-    }
+    const t = setTimeout(() => {
+      try {
+        flatRef.current?.scrollToEnd?.({ animated: true });
+      } catch (e) {
+        // silent fail
+      }
+    }, 80);
+    return () => clearTimeout(t);
   }, [messages, activeContact]);
 
   if (!activeContact) {

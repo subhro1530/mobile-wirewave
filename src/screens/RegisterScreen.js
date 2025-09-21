@@ -42,42 +42,49 @@ export default function RegisterScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Image
-        source={require("../../assets/logo.png")}
-        style={styles.logo}
-        resizeMode="contain"
+      <StatusBar
+        translucent
+        backgroundColor="transparent"
+        barStyle="light-content"
       />
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
-        placeholderTextColor="#999"
-        onChangeText={setEmail}
-        value={email}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        placeholderTextColor="#999"
-        secureTextEntry
-        onChangeText={setPassword}
-        value={password}
-      />
-      <TouchableOpacity
-        style={styles.actionButton}
-        onPress={handleRegister}
-        accessibilityLabel="Create account"
-      >
-        <Icon name="check-circle" size={24} color="#fff" />
-        <Text style={styles.actionButtonText}>Register</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        onPress={() => navigation.navigate("Login")}
-        style={styles.linkButton}
-        accessibilityLabel="Back to login"
-      >
-        <Icon name="login" size={20} color="#aaa" />
-        <Text style={styles.linkButtonText}>Login</Text>
-      </TouchableOpacity>
+      <View style={styles.inner}>
+        <Image
+          source={require("../../assets/logo.png")}
+          style={styles.logo}
+          resizeMode="contain"
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Email"
+          placeholderTextColor="#999"
+          onChangeText={setEmail}
+          value={email}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Password"
+          placeholderTextColor="#999"
+          secureTextEntry
+          onChangeText={setPassword}
+          value={password}
+        />
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={handleRegister}
+          accessibilityLabel="Create account"
+        >
+          <Icon name="check-circle" size={24} color="#fff" />
+          <Text style={styles.actionButtonText}>Register</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => navigation.navigate("Login")}
+          style={styles.linkButton}
+          accessibilityLabel="Back to login"
+        >
+          <Icon name="login" size={20} color="#aaa" />
+          <Text style={styles.linkButtonText}>Login</Text>
+        </TouchableOpacity>
+      </View>
     </SafeAreaView>
   );
 }
@@ -86,12 +93,16 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#101010",
+    paddingTop:
+      (Platform.OS === "android" ? StatusBar.currentHeight || 0 : 0) + 6,
+    paddingBottom: 0,
+  },
+  inner: {
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    padding: 20,
-    paddingTop:
-      (Platform.OS === "android" ? StatusBar.currentHeight || 0 : 0) + 12,
-    paddingBottom: 16,
+    paddingHorizontal: 24,
+    paddingBottom: 12,
   },
   logo: {
     width: 140,

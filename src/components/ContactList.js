@@ -15,14 +15,14 @@ export default function ContactList({
   currentUserEmail,
   onSelect,
   onClose,
-  logout, // added
-  notificationsEnabled, // added
-  onToggleNotifications, // added
+  logout,
+  notificationsEnabled,
+  onToggleNotifications,
 }) {
   const [query, setQuery] = useState("");
   const [newEmail, setNewEmail] = useState("");
-  const [showMenu, setShowMenu] = useState(false); // added
-  const [showNewInputs, setShowNewInputs] = useState(false); // added
+  const [showMenu, setShowMenu] = useState(false);
+  const [showNewChat, setShowNewChat] = useState(false); // renamed logic
 
   const contacts = useMemo(() => {
     const map = new Map();
@@ -58,7 +58,7 @@ export default function ContactList({
     if (!e || !e.includes("@")) return;
     onSelect?.(e);
     setNewEmail("");
-    setShowNewInputs(false);
+    setShowNewChat(false);
   };
 
   return (
@@ -85,18 +85,7 @@ export default function ContactList({
 
       {showMenu && (
         <View style={styles.menu}>
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => {
-              setShowNewInputs((s) => !s);
-              setShowMenu(false);
-              setQuery("");
-            }}
-          >
-            <Text style={styles.menuItemTxt}>
-              {showNewInputs ? "Hide New Chat" : "Start New Chat"}
-            </Text>
-          </TouchableOpacity>
+          {/* Removed Start/Hide New Chat menu item (now a button below search) */}
           <TouchableOpacity
             style={styles.menuItem}
             onPress={() => {
@@ -124,37 +113,52 @@ export default function ContactList({
         </View>
       )}
 
-      {showNewInputs && (
-        <>
-          <View style={styles.section}>
-            <TextInput
-              style={styles.search}
-              placeholder="Search..."
-              placeholderTextColor="#666"
-              value={query}
-              onChangeText={setQuery}
-            />
-          </View>
-          <View style={styles.sectionRow}>
-            <TextInput
-              style={[styles.search, { flex: 1 }]}
-              placeholder="Start new chat (email)"
-              placeholderTextColor="#666"
-              value={newEmail}
-              onChangeText={setNewEmail}
-              onSubmitEditing={handleAdd}
-              autoCapitalize="none"
-              keyboardType="email-address"
-            />
-            <TouchableOpacity style={styles.addBtn} onPress={handleAdd}>
-              <Text style={styles.addTxt}>+</Text>
-            </TouchableOpacity>
-          </View>
-        </>
+      {/* Always-visible conversation search */}
+      <View style={styles.section}>
+        <TextInput
+          style={styles.search}
+          placeholder="Search conversations..."
+          placeholderTextColor="#666"
+          value={query}
+          onChangeText={setQuery}
+        />
+      </View>
+
+      {/* Toggle button for new chat input */}
+      <TouchableOpacity
+        style={styles.toggleNewBtn}
+        onPress={() => setShowNewChat((v) => !v)}
+      >
+        <Icon
+          name={showNewChat ? "expand-less" : "add-circle-outline"}
+          size={18}
+          color="#3a7afe"
+        />
+        <Text style={styles.toggleNewTxt}>
+          {showNewChat ? "Hide chat start" : "Show chat start"}
+        </Text>
+      </TouchableOpacity>
+
+      {showNewChat && (
+        <View style={styles.sectionRow}>
+          <TextInput
+            style={[styles.search, { flex: 1 }]}
+            placeholder="Start new chat (email)"
+            placeholderTextColor="#666"
+            value={newEmail}
+            onChangeText={setNewEmail}
+            onSubmitEditing={handleAdd}
+            autoCapitalize="none"
+            keyboardType="email-address"
+          />
+          <TouchableOpacity style={styles.addBtn} onPress={handleAdd}>
+            <Text style={styles.addTxt}>+</Text>
+          </TouchableOpacity>
+        </View>
       )}
 
       <FlatList
-        data={showNewInputs ? filtered : contacts}
+        data={filtered}
         keyExtractor={(item) => item.email}
         contentContainerStyle={{ paddingBottom: 30 }}
         renderItem={({ item }) => (
@@ -188,9 +192,7 @@ export default function ContactList({
         )}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={{ color: "#555" }}>
-              {showNewInputs ? "No matches" : "No conversations"}
-            </Text>
+            <Text style={{ color: "#555" }}>No conversations</Text>
           </View>
         }
       />
@@ -277,4 +279,11 @@ const styles = StyleSheet.create({
   preview: { color: "#888", fontSize: 12, maxWidth: 160 },
   time: { color: "#666", fontSize: 10, marginLeft: 6 },
   empty: { padding: 32, alignItems: "center" },
+  toggleNewBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  toggleNewTxt: { color: "#3a7afe", marginLeft: 6, fontSize: 12 },
 });

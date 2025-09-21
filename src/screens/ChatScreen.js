@@ -1,4 +1,10 @@
-import React, { useEffect, useState, useCallback, useContext } from "react";
+import React, {
+  useEffect,
+  useState,
+  useCallback,
+  useContext,
+  useRef,
+} from "react";
 import {
   View,
   StyleSheet,
@@ -32,7 +38,7 @@ export default function ChatScreen() {
   const [showContacts, setShowContacts] = useState(true); // auto true on narrow until contact chosen
   const [keyboardVisible, setKeyboardVisible] = useState(false); // added
   const [notificationsEnabled, setNotificationsEnabled] = useState(true); // added
-  const [knownContacts, setKnownContacts] = useState(new Set()); // added
+  const knownContactsRef = useRef(new Set()); // stable ref
   const [newContactNotice, setNewContactNotice] = useState(null); // added
 
   const loadMessages = useCallback(async () => {
@@ -117,19 +123,31 @@ export default function ChatScreen() {
         m.sender_email === userEmail ? m.receiver_email : m.sender_email;
       if (peer && peer !== userEmail) current.add(peer);
     });
-    if (knownContacts.size && notificationsEnabled) {
+
+    const prev = knownContactsRef.current;
+
+    if (notificationsEnabled && prev.size) {
       current.forEach((c) => {
-        if (!knownContacts.has(c)) {
+        if (!prev.has(c)) {
           setNewContactNotice(c);
           setTimeout(() => setNewContactNotice(null), 4000);
         }
       });
     }
-    setKnownContacts(current);
-  }, [messages, userEmail, notificationsEnabled, knownContacts]);
+
+    // Update ref only if changed (avoid unnecessary renders)
+    if (prev.size !== current.size || [...prev].some((p) => !current.has(p))) {
+      knownContactsRef.current = current;
+    }
+  }, [messages, userEmail, notificationsEnabled]); // removed knownContacts from deps
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <StatusBar
+        translucent
+        backgroundColor="transparent"
+        barStyle="light-content"
+      />
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -263,7 +281,8 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: "#101010",
-    paddingTop: Platform.OS === "android" ? StatusBar.currentHeight || 0 : 0,
+    paddingTop:
+      Platform.OS === "android" ? (StatusBar.currentHeight || 0) + 4 : 4,
     paddingBottom: 0,
   },
   root: { flex: 1, flexDirection: "row", backgroundColor: "#101010" },
@@ -297,7 +316,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingVertical: 6, // reduced
     backgroundColor: "#161616",
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "#222",
@@ -343,13 +362,14 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingVertical: 6, // slightly bigger than 4 for balance
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: "#222",
     backgroundColor: "#161616",
   },
   composerAtRest: {
-    marginBottom: 6, // spacing when keyboard hidden
+    // removed bottom margin to eliminate white strip
+    marginBottom: 0,
   },
   input: {
     flex: 1,

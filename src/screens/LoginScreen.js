@@ -44,43 +44,49 @@ export default function LoginScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Logo */}
-      <Image
-        source={require("../../assets/logo.png")}
-        style={styles.logo}
-        resizeMode="contain"
+      <StatusBar
+        translucent
+        backgroundColor="transparent"
+        barStyle="light-content"
       />
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
-        placeholderTextColor="#999"
-        onChangeText={setEmail}
-        value={email}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        placeholderTextColor="#999"
-        secureTextEntry
-        onChangeText={setPassword}
-        value={password}
-      />
-      <TouchableOpacity
-        style={styles.actionButton}
-        onPress={handleLogin}
-        accessibilityLabel="Log in"
-      >
-        <Icon name="login" size={24} color="#fff" />
-        <Text style={styles.actionButtonText}>Login</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        onPress={() => navigation.navigate("Register")}
-        style={styles.linkButton}
-        accessibilityLabel="Go to register"
-      >
-        <Icon name="person-add-alt" size={20} color="#aaa" />
-        <Text style={styles.linkButtonText}>Register</Text>
-      </TouchableOpacity>
+      <View style={styles.inner}>
+        <Image
+          source={require("../../assets/logo.png")}
+          style={styles.logo}
+          resizeMode="contain"
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Email"
+          placeholderTextColor="#999"
+          onChangeText={setEmail}
+          value={email}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Password"
+          placeholderTextColor="#999"
+          secureTextEntry
+          onChangeText={setPassword}
+          value={password}
+        />
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={handleLogin}
+          accessibilityLabel="Log in"
+        >
+          <Icon name="login" size={24} color="#fff" />
+          <Text style={styles.actionButtonText}>Login</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => navigation.navigate("Register")}
+          style={styles.linkButton}
+          accessibilityLabel="Go to register"
+        >
+          <Icon name="person-add-alt" size={20} color="#aaa" />
+          <Text style={styles.linkButtonText}>Register</Text>
+        </TouchableOpacity>
+      </View>
     </SafeAreaView>
   );
 }
@@ -89,12 +95,16 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#101010",
+    paddingTop:
+      (Platform.OS === "android" ? StatusBar.currentHeight || 0 : 0) + 6,
+    paddingBottom: 0,
+  },
+  inner: {
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    padding: 20,
-    paddingTop:
-      (Platform.OS === "android" ? StatusBar.currentHeight || 0 : 0) + 12,
-    paddingBottom: 16,
+    paddingHorizontal: 24,
+    paddingBottom: 12,
   },
   logo: {
     width: 140,
