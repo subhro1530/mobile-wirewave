@@ -17,6 +17,9 @@ import {
   StatusBar,
   KeyboardAvoidingView,
   Keyboard,
+  Modal,
+  Pressable,
+  Image, // for avatar display in profile viewer
 } from "react-native";
 import { TextInput } from "react-native-paper";
 import API from "../api";
@@ -43,6 +46,22 @@ export default function ChatScreen() {
   const [composerHeight, setComposerHeight] = useState(52); // added default
   const chatListRef = useRef(null); // optional future use
   const chatWindowRef = useRef(null); // added
+  const [chatMenuOpen, setChatMenuOpen] = useState(false); // new
+  const [profileModalVisible, setProfileModalVisible] = useState(false); // new
+  const [profileLoading, setProfileLoading] = useState(false); // new
+  const [profileData, setProfileData] = useState(null); // new
+  const [profileError, setProfileError] = useState(null); // new
+  const [deleteInfo, setDeleteInfo] = useState(null); // new banner after delete
+  const [myProfileModalVisible, setMyProfileModalVisible] = useState(false); // editor modal
+  const [myProfileLoading, setMyProfileLoading] = useState(false);
+  const [myProfileError, setMyProfileError] = useState(null);
+  const [myProfileData, setMyProfileData] = useState(null);
+  const [myProfileSaving, setMyProfileSaving] = useState(false);
+  const [myProfileForm, setMyProfileForm] = useState({
+    name: "",
+    about: "",
+    avatar_url: "",
+  });
 
   const loadMessages = useCallback(async () => {
     if (!userEmail) return;
@@ -152,7 +171,172 @@ export default function ChatScreen() {
     }
   }, [messages, userEmail, notificationsEnabled]); // removed knownContacts from deps
 
+  const fetchProfile = useCallback(async () => {
+    if (!activeContact) return;
+    setProfileLoading(true);
+    setProfileError(null);
+    setProfileData(null);
+    try {
+      const res = await fetch(
+        `https://wirewaveapi.onrender.com/users/search?email=${encodeURIComponent(
+          activeContact
+        )}`,
+        {
+          headers: {
+            Authorization: global.authToken
+              ? `Bearer ${global.authToken}`
+              : undefined,
+          },
+        }
+      );
+      const data = await res.json();
+      // API may return array or object
+      const entry = Array.isArray(data) ? data[0] : data;
+      setProfileData(entry || {});
+    } catch (e) {
+      setProfileError(e.message);
+    } finally {
+      setProfileLoading(false);
+      setProfileModalVisible(true);
+    }
+  }, [activeContact]);
+
+  // ===== Delete Chat (parse server response) =====
+  const deleteChat = useCallback(async () => {
+    if (!activeContact) return;
+    try {
+      const res = await fetch(
+        `https://wirewaveapi.onrender.com/messages/${encodeURIComponent(
+          activeContact
+        )}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: global.authToken
+              ? `Bearer ${global.authToken}`
+              : undefined,
+          },
+        }
+      );
+      let serverMsg = "";
+      try {
+        const json = await res.json();
+        if (json?.message) {
+          serverMsg = json.message;
+        } else if (json?.success) {
+          serverMsg = `Deleted ${json.deletedCount || 0} messages`;
+        }
+      } catch {
+        /* ignore */
+      }
+      // Remove chat locally
+      setMessages((prev) =>
+        prev.filter(
+          (m) =>
+            !(
+              (m.sender_email === activeContact &&
+                m.receiver_email === userEmail) ||
+              (m.receiver_email === activeContact &&
+                m.sender_email === userEmail)
+            )
+        )
+      );
+      setActiveContact(null);
+      setChatMenuOpen(false);
+      if (serverMsg) {
+        setDeleteInfo(serverMsg);
+        setTimeout(() => setDeleteInfo(null), 4000);
+      }
+    } catch (e) {
+      setError(e.message || "Delete failed");
+    }
+  }, [activeContact, userEmail]);
+
+  // bulk delete handler
+  const bulkDeleteChats = useCallback(
+    async (emails) => {
+      if (!emails?.length) return;
+      try {
+        await Promise.all(
+          emails.map((em) =>
+            API.delete(`/messages/${encodeURIComponent(em)}`).catch(() => null)
+          )
+        );
+      } catch (e) {
+        setError(e.message || "Bulk delete failed");
+      } finally {
+        setMessages((prev) =>
+          prev.filter((m) => {
+            const peer =
+              m.sender_email === userEmail ? m.receiver_email : m.sender_email;
+            return !emails.includes(peer);
+          })
+        );
+        if (activeContact && emails.includes(activeContact)) {
+          setActiveContact(null);
+        }
+      }
+    },
+    [activeContact, userEmail]
+  );
+
   const bottomInset = composerHeight + 8; // space for last bubble
+
+  // ===== My Profile Editor =====
+  const openMyProfile = useCallback(async () => {
+    setMyProfileModalVisible(true);
+    setMyProfileLoading(true);
+    setMyProfileError(null);
+    setMyProfileData(null);
+    try {
+      const { data } = await API.get("/profile");
+      setMyProfileData(data);
+      setMyProfileForm({
+        name: data?.name || "",
+        about: data?.about || "",
+        avatar_url: data?.avatar_url || "",
+      });
+    } catch (e) {
+      // If 404 (no profile yet) allow creation
+      setMyProfileError(e.message);
+    } finally {
+      setMyProfileLoading(false);
+    }
+  }, []);
+
+  const saveMyProfile = useCallback(async () => {
+    setMyProfileSaving(true);
+    setMyProfileError(null);
+    try {
+      const method =
+        myProfileData &&
+        (myProfileData.name || myProfileData.about || myProfileData.avatar_url)
+          ? "PUT"
+          : "POST";
+      const endpoint = "/profile";
+      const payload = {
+        name: myProfileForm.name.trim(),
+        about: myProfileForm.about.trim(),
+        avatar_url: myProfileForm.avatar_url.trim(),
+      };
+      const res =
+        method === "POST"
+          ? await API.post(endpoint, payload)
+          : await API.put(endpoint, payload);
+      setMyProfileData(res.data);
+      setMyProfileForm({
+        name: res.data?.name || "",
+        about: res.data?.about || "",
+        avatar_url: res.data?.avatar_url || "",
+      });
+      setDeleteInfo("Profile saved successfully");
+      setTimeout(() => setDeleteInfo(null), 4000);
+    } catch (e) {
+      setMyProfileError(e.message || "Save failed");
+    } finally {
+      setMyProfileSaving(false);
+    }
+  }, [myProfileForm, myProfileData]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -182,6 +366,8 @@ export default function ChatScreen() {
                 logout={logout}
                 notificationsEnabled={notificationsEnabled}
                 onToggleNotifications={() => setNotificationsEnabled((v) => !v)}
+                onBulkDelete={bulkDeleteChats}
+                onOpenMyProfile={openMyProfile} // added
               />
             </View>
           )}
@@ -200,7 +386,11 @@ export default function ChatScreen() {
               )}
               <View style={styles.headerCenter}>
                 {activeContact && (
-                  <View style={styles.chatInfo}>
+                  <TouchableOpacity
+                    style={styles.chatInfo}
+                    onPress={fetchProfile}
+                    activeOpacity={0.8}
+                  >
                     <View style={styles.avatarSmall}>
                       <Text style={styles.avatarSmallTxt}>
                         {activeContact.slice(0, 2).toUpperCase()}
@@ -209,12 +399,84 @@ export default function ChatScreen() {
                     <Text style={styles.chatEmail} numberOfLines={1}>
                       {activeContact}
                     </Text>
-                  </View>
+                  </TouchableOpacity>
                 )}
               </View>
-              {/* removed logout icon (in sidebar menu) */}
-              <View style={{ width: 38 }} />
+              {activeContact ? (
+                <TouchableOpacity
+                  style={styles.iconBtn}
+                  onPress={() => setChatMenuOpen((v) => !v)}
+                >
+                  <Icon name="more-vert" size={22} color="#fff" />
+                </TouchableOpacity>
+              ) : (
+                <View style={{ width: 38 }} /> // placeholder, no profile icon
+              )}
             </View>
+            {chatMenuOpen && activeContact && (
+              <View style={styles.chatMenu}>
+                <TouchableOpacity
+                  style={styles.chatMenuItem}
+                  onPress={() => {
+                    setChatMenuOpen(false);
+                    fetchProfile();
+                  }}
+                >
+                  <Icon
+                    name="person"
+                    size={16}
+                    color="#fff"
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text style={styles.chatMenuTxt}>View Profile</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.chatMenuItem}
+                  onPress={openMyProfile}
+                >
+                  <Icon
+                    name="account-circle"
+                    size={16}
+                    color="#fff"
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text style={styles.chatMenuTxt}>My Profile</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.chatMenuItem}
+                  onPress={deleteChat}
+                >
+                  <Icon
+                    name="delete"
+                    size={16}
+                    color="#ff6666"
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text style={[styles.chatMenuTxt, { color: "#ff6666" }]}>
+                    Delete Chat
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.chatMenuItem}
+                  onPress={() => setChatMenuOpen(false)}
+                >
+                  <Icon
+                    name="close"
+                    size={16}
+                    color="#aaa"
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text style={[styles.chatMenuTxt, { color: "#aaa" }]}>
+                    Close
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            {deleteInfo && (
+              <View style={styles.deleteBanner}>
+                <Text style={styles.deleteBannerText}>{deleteInfo}</Text>
+              </View>
+            )}
             {newContactNotice && (
               <View style={styles.noticeBanner}>
                 <Text style={styles.noticeText}>
@@ -289,6 +551,194 @@ export default function ChatScreen() {
           </View>
         </View>
       </KeyboardAvoidingView>
+      {/* Profile Modal */}
+      <Modal
+        transparent
+        visible={profileModalVisible}
+        animationType="fade"
+        onRequestClose={() => setProfileModalVisible(false)}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setProfileModalVisible(false)}
+        >
+          <View />
+        </Pressable>
+        <View style={styles.modalCard}>
+          {profileLoading ? (
+            <ActivityIndicator color="#3a7afe" />
+          ) : profileError ? (
+            <Text style={{ color: "#f55" }}>{profileError}</Text>
+          ) : profileData ? (
+            <>
+              {profileData.avatar_url ? (
+                <Image
+                  source={{ uri: profileData.avatar_url }}
+                  style={styles.profileAvatar}
+                />
+              ) : null}
+              <Text style={styles.profileEmail}>{activeContact}</Text>
+              {profileData.name ? (
+                <Text style={styles.profileName}>{profileData.name}</Text>
+              ) : null}
+              {profileData.about ? (
+                <Text style={styles.profileAbout}>{profileData.about}</Text>
+              ) : null}
+              {profileData.avatar_url ? (
+                <Text style={styles.profileMeta}>
+                  Avatar URL: {profileData.avatar_url}
+                </Text>
+              ) : null}
+            </>
+          ) : (
+            <Text style={{ color: "#ccc" }}>No profile data.</Text>
+          )}
+          <TouchableOpacity
+            onPress={() => setProfileModalVisible(false)}
+            style={styles.closeModalBtn}
+          >
+            <Text style={{ color: "#3a7afe", fontWeight: "600" }}>Close</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+      {/* My Profile Editor Modal */}
+      <Modal
+        transparent
+        visible={myProfileModalVisible}
+        animationType="slide"
+        onRequestClose={() => setMyProfileModalVisible(false)}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => !myProfileSaving && setMyProfileModalVisible(false)}
+        >
+          <View />
+        </Pressable>
+        <View style={styles.modalCard}>
+          <Text style={styles.profileEmail}>My Profile</Text>
+          {myProfileLoading ? (
+            <ActivityIndicator color="#3a7afe" style={{ marginTop: 12 }} />
+          ) : (
+            <>
+              {myProfileError && (
+                <Text style={{ color: "#f55", marginTop: 8 }}>
+                  {myProfileError}
+                </Text>
+              )}
+              <View style={styles.editField}>
+                <Text style={styles.editLabel}>Name</Text>
+                <TextInput
+                  value={myProfileForm.name}
+                  onChangeText={(v) =>
+                    setMyProfileForm((f) => ({ ...f, name: v }))
+                  }
+                  placeholder="Your display name"
+                  placeholderTextColor="#777"
+                  style={styles.editInput}
+                  textColor="#fff"
+                  theme={{
+                    colors: {
+                      primary: "#3a7afe",
+                      background: "#1f1f1f",
+                      surface: "#1f1f1f",
+                      onSurface: "#fff",
+                      text: "#fff",
+                    },
+                  }}
+                  underlineColor="transparent"
+                />
+              </View>
+              <View style={styles.editField}>
+                <Text style={styles.editLabel}>About</Text>
+                <TextInput
+                  value={myProfileForm.about}
+                  onChangeText={(v) =>
+                    setMyProfileForm((f) => ({ ...f, about: v }))
+                  }
+                  placeholder="Something about you"
+                  placeholderTextColor="#777"
+                  style={[
+                    styles.editInput,
+                    { height: 70, textAlignVertical: "top" },
+                  ]}
+                  multiline
+                  textColor="#fff"
+                  theme={{
+                    colors: {
+                      primary: "#3a7afe",
+                      background: "#1f1f1f",
+                      surface: "#1f1f1f",
+                      onSurface: "#fff",
+                      text: "#fff",
+                    },
+                  }}
+                  underlineColor="transparent"
+                />
+              </View>
+              <View style={styles.editField}>
+                <Text style={styles.editLabel}>Avatar URL</Text>
+                <TextInput
+                  value={myProfileForm.avatar_url}
+                  onChangeText={(v) =>
+                    setMyProfileForm((f) => ({ ...f, avatar_url: v }))
+                  }
+                  placeholder="https://..."
+                  placeholderTextColor="#777"
+                  style={styles.editInput}
+                  autoCapitalize="none"
+                  textColor="#fff"
+                  theme={{
+                    colors: {
+                      primary: "#3a7afe",
+                      background: "#1f1f1f",
+                      surface: "#1f1f1f",
+                      onSurface: "#fff",
+                      text: "#fff",
+                    },
+                  }}
+                  underlineColor="transparent"
+                />
+              </View>
+              {myProfileForm.avatar_url ? (
+                <Image
+                  source={{ uri: myProfileForm.avatar_url }}
+                  style={styles.profileAvatarPreview}
+                />
+              ) : (
+                <View style={styles.profileAvatarFallback}>
+                  <Text style={styles.profileAvatarFallbackTxt}>
+                    {userEmail?.[0]?.toUpperCase() || "U"}
+                  </Text>
+                </View>
+              )}
+              <View style={styles.profileActionsRow}>
+                <TouchableOpacity
+                  style={[styles.saveBtn, myProfileSaving && { opacity: 0.6 }]}
+                  disabled={myProfileSaving}
+                  onPress={saveMyProfile}
+                >
+                  {myProfileSaving ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.saveBtnTxt}>
+                      {myProfileData ? "Update" : "Create"}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.cancelBtn}
+                  onPress={() =>
+                    !myProfileSaving && setMyProfileModalVisible(false)
+                  }
+                  disabled={myProfileSaving}
+                >
+                  <Text style={styles.cancelBtnTxt}>Close</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -410,4 +860,121 @@ const styles = StyleSheet.create({
     borderBottomColor: "#2b4d92",
   },
   noticeText: { color: "#fff", fontSize: 12 },
+  chatMenu: {
+    position: "absolute",
+    top: 56,
+    right: 10,
+    backgroundColor: "#1f1f1f",
+    borderRadius: 10,
+    paddingVertical: 4,
+    minWidth: 160,
+    zIndex: 50,
+    elevation: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#2a2a2a",
+  },
+  chatMenuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  chatMenuTxt: { color: "#fff", fontSize: 13, fontWeight: "500" },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.5)",
+  },
+  modalCard: {
+    position: "absolute",
+    left: 24,
+    right: 24,
+    top: "25%",
+    backgroundColor: "#181818",
+    borderRadius: 14,
+    padding: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#2a2a2a",
+  },
+  profileEmail: { color: "#fff", fontSize: 16, fontWeight: "600" },
+  profileName: {
+    color: "#3a7afe",
+    marginTop: 6,
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  profileAbout: { color: "#bbb", marginTop: 6, fontSize: 13, lineHeight: 18 },
+  profileMeta: { color: "#666", marginTop: 8, fontSize: 11 },
+  closeModalBtn: {
+    alignSelf: "flex-end",
+    marginTop: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  deleteBanner: {
+    backgroundColor: "#2b3d1f",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderBottomColor: "#355026",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  deleteBannerText: { color: "#c4f6aa", fontSize: 12 },
+  profileAvatar: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    alignSelf: "flex-start",
+    marginBottom: 8,
+  },
+  editField: { marginTop: 14 },
+  editLabel: { color: "#999", fontSize: 12, marginBottom: 4 },
+  editInput: {
+    backgroundColor: "#1f1f1f",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: "#fff",
+    fontSize: 14,
+  },
+  profileAvatarPreview: {
+    width: 90,
+    height: 90,
+    borderRadius: 45, // circular now
+    marginTop: 12,
+    alignSelf: "flex-start",
+  },
+  profileAvatarFallback: {
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    marginTop: 12,
+    alignSelf: "flex-start",
+    backgroundColor: "#2d2d2d",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#444",
+  },
+  profileAvatarFallbackTxt: {
+    color: "#fff",
+    fontSize: 34,
+    fontWeight: "700",
+  },
+  profileActionsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 18,
+  },
+  saveBtn: {
+    backgroundColor: "#3a7afe",
+    paddingHorizontal: 22,
+    paddingVertical: 12,
+    borderRadius: 26,
+  },
+  saveBtnTxt: { color: "#fff", fontWeight: "600", fontSize: 14 },
+  cancelBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginLeft: 12,
+  },
+  cancelBtnTxt: { color: "#bbb", fontSize: 14 },
 });

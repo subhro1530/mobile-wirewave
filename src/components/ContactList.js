@@ -18,11 +18,15 @@ export default function ContactList({
   logout,
   notificationsEnabled,
   onToggleNotifications,
+  onBulkDelete,
+  onOpenMyProfile, // added
 }) {
   const [query, setQuery] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const [showMenu, setShowMenu] = useState(false);
   const [showNewChat, setShowNewChat] = useState(false); // renamed logic
+  const [selected, setSelected] = useState(new Set()); // added
+  const [selectionMode, setSelectionMode] = useState(false); // added
 
   const contacts = useMemo(() => {
     const map = new Map();
@@ -61,31 +65,83 @@ export default function ContactList({
     setShowNewChat(false);
   };
 
+  const toggleSelect = (email) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(email)) next.delete(email);
+      else next.add(email);
+      if (next.size === 0) setSelectionMode(false);
+      return next;
+    });
+  };
+
+  const startSelection = (email) => {
+    setSelectionMode(true);
+    setSelected(new Set([email]));
+  };
+
+  const cancelSelection = () => {
+    setSelectionMode(false);
+    setSelected(new Set());
+  };
+
+  const deleteSelected = async () => {
+    if (!selected.size) return;
+    const emails = Array.from(selected);
+    await onBulkDelete?.(emails);
+    cancelSelection();
+  };
+
   return (
     <View style={styles.container}>
-      {/* Top bar */}
-      <View style={styles.topBar}>
-        <TouchableOpacity
-          style={styles.topBtn}
-          onPress={() => setShowMenu((v) => !v)}
-        >
-          <Icon name="more-vert" size={22} color="#fff" />
-        </TouchableOpacity>
-        <Text style={styles.topTitle} numberOfLines={1}>
-          Chats
-        </Text>
-        {onClose ? (
-          <TouchableOpacity style={styles.topBtn} onPress={onClose}>
-            <Icon name="close" size={20} color="#fff" />
+      {/* Selection header (replaces top bar) */}
+      {selectionMode ? (
+        <View style={styles.selectionBar}>
+          <TouchableOpacity style={styles.selBtn} onPress={cancelSelection}>
+            <Icon name="close" size={22} color="#fff" />
           </TouchableOpacity>
-        ) : (
-          <View style={{ width: 34 }} />
-        )}
-      </View>
+          <Text style={styles.selTitle}>{selected.size} selected</Text>
+          <TouchableOpacity
+            style={[styles.selBtn, selected.size === 0 && { opacity: 0.4 }]}
+            disabled={!selected.size}
+            onPress={deleteSelected}
+          >
+            <Icon name="delete" size={22} color="#ff6666" />
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <View style={styles.topBar}>
+          <TouchableOpacity
+            style={styles.topBtn}
+            onPress={() => setShowMenu((v) => !v)}
+          >
+            <Icon name="more-vert" size={22} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.topTitle} numberOfLines={1}>
+            Chats
+          </Text>
+          {onClose ? (
+            <TouchableOpacity style={styles.topBtn} onPress={onClose}>
+              <Icon name="close" size={20} color="#fff" />
+            </TouchableOpacity>
+          ) : (
+            <View style={{ width: 34 }} />
+          )}
+        </View>
+      )}
 
-      {showMenu && (
+      {/* ...existing menu, search, toggle new chat, new chat input... */}
+      {!selectionMode && showMenu && (
         <View style={styles.menu}>
-          {/* Removed Start/Hide New Chat menu item (now a button below search) */}
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => {
+              setShowMenu(false);
+              onOpenMyProfile?.();
+            }}
+          >
+            <Text style={styles.menuItemTxt}>My Profile</Text>
+          </TouchableOpacity>
           <TouchableOpacity
             style={styles.menuItem}
             onPress={() => {
@@ -113,86 +169,122 @@ export default function ContactList({
         </View>
       )}
 
-      {/* Always-visible conversation search */}
-      <View style={styles.section}>
-        <TextInput
-          style={styles.search}
-          placeholder="Search conversations..."
-          placeholderTextColor="#666"
-          value={query}
-          onChangeText={setQuery}
-        />
-      </View>
-
-      {/* Toggle button for new chat input */}
-      <TouchableOpacity
-        style={styles.toggleNewBtn}
-        onPress={() => setShowNewChat((v) => !v)}
-      >
-        <Icon
-          name={showNewChat ? "expand-less" : "add-circle-outline"}
-          size={18}
-          color="#3a7afe"
-        />
-        <Text style={styles.toggleNewTxt}>
-          {showNewChat ? "Hide chat start" : "Show chat start"}
-        </Text>
-      </TouchableOpacity>
-
-      {showNewChat && (
-        <View style={styles.sectionRow}>
-          <TextInput
-            style={[styles.search, { flex: 1 }]}
-            placeholder="Start new chat (email)"
-            placeholderTextColor="#666"
-            value={newEmail}
-            onChangeText={setNewEmail}
-            onSubmitEditing={handleAdd}
-            autoCapitalize="none"
-            keyboardType="email-address"
-          />
-          <TouchableOpacity style={styles.addBtn} onPress={handleAdd}>
-            <Text style={styles.addTxt}>+</Text>
+      {!selectionMode && (
+        <>
+          <View style={styles.section}>
+            <TextInput
+              style={styles.search}
+              placeholder="Search conversations..."
+              placeholderTextColor="#666"
+              value={query}
+              onChangeText={setQuery}
+            />
+          </View>
+          <TouchableOpacity
+            style={styles.toggleNewBtn}
+            onPress={() => setShowNewChat((v) => !v)}
+          >
+            <Icon
+              name={showNewChat ? "expand-less" : "add-circle-outline"}
+              size={18}
+              color="#3a7afe"
+            />
+            <Text style={styles.toggleNewTxt}>
+              {showNewChat ? "Hide chat start" : "Show chat start"}
+            </Text>
           </TouchableOpacity>
-        </View>
+          {showNewChat && (
+            <View style={styles.sectionRow}>
+              <TextInput
+                style={[styles.search, { flex: 1 }]}
+                placeholder="Start new chat (email)"
+                placeholderTextColor="#666"
+                value={newEmail}
+                onChangeText={setNewEmail}
+                onSubmitEditing={handleAdd}
+                autoCapitalize="none"
+                keyboardType="email-address"
+              />
+              <TouchableOpacity style={styles.addBtn} onPress={handleAdd}>
+                <Text style={styles.addTxt}>+</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </>
       )}
 
       <FlatList
         data={filtered}
         keyExtractor={(item) => item.email}
         contentContainerStyle={{ paddingBottom: 30 }}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={styles.row}
-            onPress={() => onSelect?.(item.email)}
-          >
-            <View style={styles.avatar}>
-              <Text style={styles.avatarTxt}>
-                {item.email.slice(0, 2).toUpperCase()}
-              </Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.name}>{item.email}</Text>
-              <Text
-                style={styles.preview}
-                numberOfLines={1}
-                ellipsizeMode="tail"
-              >
-                {item.lastMessage || "No messages yet"}
-              </Text>
-            </View>
-            <Text style={styles.time}>
-              {item.lastMessageTime &&
-                new Date(item.lastMessageTime).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-            </Text>
-          </TouchableOpacity>
-        )}
+        renderItem={({ item }) => {
+          const isSel = selected.has(item.email);
+          return (
+            <TouchableOpacity
+              style={[styles.row, selectionMode && isSel && styles.rowSelected]}
+              onPress={() =>
+                selectionMode
+                  ? toggleSelect(item.email)
+                  : onSelect?.(item.email)
+              }
+              onLongPress={() => {
+                if (!selectionMode) startSelection(item.email);
+              }}
+              delayLongPress={300}
+            >
+              <View style={styles.avatar}>
+                {selectionMode ? (
+                  isSel ? (
+                    <Icon name="check-circle" size={22} color="#fff" />
+                  ) : (
+                    <Icon
+                      name="radio-button-unchecked"
+                      size={20}
+                      color="#bbb"
+                    />
+                  )
+                ) : (
+                  <Text style={styles.avatarTxt}>
+                    {item.email.slice(0, 2).toUpperCase()}
+                  </Text>
+                )}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={[
+                    styles.name,
+                    selectionMode && isSel && { color: "#3a7afe" },
+                  ]}
+                >
+                  {item.email}
+                </Text>
+                {!selectionMode && (
+                  <Text
+                    style={styles.preview}
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                  >
+                    {item.lastMessage || "No messages yet"}
+                  </Text>
+                )}
+              </View>
+              {!selectionMode && (
+                <Text style={styles.time}>
+                  {item.lastMessageTime &&
+                    new Date(item.lastMessageTime).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                </Text>
+              )}
+            </TouchableOpacity>
+          );
+        }}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={{ color: "#555" }}>No conversations</Text>
+            <Text style={{ color: "#555" }}>
+              {selectionMode ? "No contacts" : "No conversations"}
+            </Text>
           </View>
         }
       />
@@ -286,4 +378,30 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   toggleNewTxt: { color: "#3a7afe", marginLeft: 6, fontSize: 12 },
+  selectionBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#1f2a3a",
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#222",
+  },
+  selBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  selTitle: {
+    flex: 1,
+    color: "#fff",
+    fontWeight: "600",
+    fontSize: 15,
+    paddingLeft: 4,
+  },
+  rowSelected: {
+    backgroundColor: "#243248",
+  },
 });

@@ -201,4 +201,72 @@ Adjust mapping if backend fields differ.
 - React Navigation
 - Inspiration from the web version of WireWave layout
 
+## REST Endpoint Cheat Sheet (Concrete Base URL)
+
+Base URL: https://wirewaveapi.onrender.com
+
+```bash
+# Test DB
+curl -X GET "https://wirewaveapi.onrender.com/testdb"
+
+# Register
+curl -X POST "https://wirewaveapi.onrender.com/register" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"mypassword"}'
+
+# Login
+curl -X POST "https://wirewaveapi.onrender.com/login" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"mypassword"}'
+
+# Send a message
+curl -X POST "https://wirewaveapi.onrender.com/messages" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  -d '{"receiver_email":"friend@example.com","content":"Hello there!"}'
+
+# Get all messages
+curl -X GET "https://wirewaveapi.onrender.com/messages" \
+  -H "Authorization: Bearer <token>"
+
+# Mark message as read
+curl -X POST "https://wirewaveapi.onrender.com/messages/read" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  -d '{"message_id":101}'
+
+# Send message to multiple receivers
+curl -X POST "https://wirewaveapi.onrender.com/messages/multi" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  -d '{"receiver_emails":["friend1@example.com","friend2@example.com"],"content":"Hello everyone!"}'
+
+# Delete entire chat with another user
+curl -X DELETE "https://wirewaveapi.onrender.com/messages/friend@example.com" \
+  -H "Authorization: Bearer <token>"
+
+# Profile (current user)
+curl -X GET "https://wirewaveapi.onrender.com/profile" \
+  -H "Authorization: Bearer <token>"
+
+# Create / Update profile
+curl -X POST "https://wirewaveapi.onrender.com/profile" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  -d '{"name":"John Doe","about":"Software Developer","avatar_url":"https://example.com/avatar.jpg"}'
+
+curl -X PUT "https://wirewaveapi.onrender.com/profile" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  -d '{"name":"John Updated","about":"Senior Developer","avatar_url":"https://example.com/avatar_updated.jpg"}'
+
+# User search
+curl -X GET "https://wirewaveapi.onrender.com/users/search?email=friend@example.com" \
+  -H "Authorization: Bearer <token>"
+
+# Delete account
+curl -X DELETE "https://wirewaveapi.onrender.com/account" \
+  -H "Authorization: Bearer <token>"
+```
+
 Happy building!
