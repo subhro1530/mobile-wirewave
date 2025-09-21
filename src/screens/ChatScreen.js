@@ -27,6 +27,7 @@ import ContactList from "../components/ContactList";
 import ChatWindow from "../components/ChatWindow";
 import { AuthContext } from "../AuthContext";
 import Icon from "react-native-vector-icons/MaterialIcons";
+import { Clipboard } from "react-native"; // (Expo SDK < 49 uses expo-clipboard; adjust if needed)
 
 export default function ChatScreen() {
   const { userEmail, logout } = useContext(AuthContext);
@@ -62,6 +63,9 @@ export default function ChatScreen() {
     about: "",
     avatar_url: "",
   });
+  const [msgSelectionMode, setMsgSelectionMode] = useState(false); // new
+  const [selectedMsgIds, setSelectedMsgIds] = useState(new Set()); // new
+  const [markingRead, setMarkingRead] = useState(false); // new
 
   const loadMessages = useCallback(async () => {
     if (!userEmail) return;
@@ -338,6 +342,91 @@ export default function ChatScreen() {
     }
   }, [myProfileForm, myProfileData]);
 
+  // Helper: toggle message selection
+  const toggleSelectMessage = useCallback((id) => {
+    setSelectedMsgIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.size === 0) setMsgSelectionMode(false);
+      return next;
+    });
+  }, []);
+
+  const startMessageSelection = useCallback((id) => {
+    setMsgSelectionMode(true);
+    setSelectedMsgIds(new Set([id]));
+  }, []);
+
+  const clearMessageSelection = useCallback(() => {
+    setMsgSelectionMode(false);
+    setSelectedMsgIds(new Set());
+  }, []);
+
+  // Auto mark unread messages (received) as read when chat opens / updates
+  useEffect(() => {
+    if (!activeContact || !filtered.length) return;
+    const unread = filtered.filter(
+      (m) => m.receiver_email === userEmail && !m.read
+    );
+    if (!unread.length) return;
+    let cancelled = false;
+    (async () => {
+      for (const m of unread) {
+        try {
+          await API.post("/messages/read", { message_id: m.id });
+        } catch {}
+        if (cancelled) break;
+      }
+      // optimistic local state update
+      setMessages((prev) =>
+        prev.map((msg) =>
+          unread.find((u) => u.id === msg.id) ? { ...msg, read: true } : msg
+        )
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeContact, filtered, userEmail]);
+
+  const markSelectedAsRead = useCallback(async () => {
+    const ids = Array.from(selectedMsgIds)
+      .map((id) => filtered.find((m) => m.id === id))
+      .filter(Boolean)
+      .filter((m) => m.receiver_email === userEmail && !m.read);
+    if (!ids.length) {
+      clearMessageSelection();
+      return;
+    }
+    setMarkingRead(true);
+    try {
+      await Promise.all(
+        ids.map((m) =>
+          API.post("/messages/read", { message_id: m.id }).catch(() => null)
+        )
+      );
+      setMessages((prev) =>
+        prev.map((m) => (selectedMsgIds.has(m.id) ? { ...m, read: true } : m))
+      );
+    } finally {
+      setMarkingRead(false);
+      clearMessageSelection();
+    }
+  }, [selectedMsgIds, filtered, userEmail, clearMessageSelection]);
+
+  const copySelected = useCallback(() => {
+    const texts = Array.from(selectedMsgIds)
+      .map((id) => filtered.find((m) => m.id === id))
+      .filter(Boolean)
+      .map((m) => m.content);
+    if (texts.length) {
+      try {
+        Clipboard.setString?.(texts.join("\n"));
+      } catch {}
+    }
+    clearMessageSelection();
+  }, [selectedMsgIds, filtered, clearMessageSelection]);
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar
@@ -376,7 +465,8 @@ export default function ChatScreen() {
           <View style={styles.chatPane}>
             {/* Header bar with toggle + logout */}
             <View style={styles.headerBar}>
-              {!isWide && !showContacts && (
+              {/* when in message selection mode replace right menu */}
+              {!isWide && !showContacts && !msgSelectionMode && (
                 <TouchableOpacity
                   style={styles.iconBtn}
                   onPress={() => setShowContacts(true)}
@@ -384,33 +474,80 @@ export default function ChatScreen() {
                   <Icon name="menu" size={22} color="#fff" />
                 </TouchableOpacity>
               )}
-              <View style={styles.headerCenter}>
-                {activeContact && (
+              {msgSelectionMode ? (
+                <>
                   <TouchableOpacity
-                    style={styles.chatInfo}
-                    onPress={fetchProfile}
-                    activeOpacity={0.8}
+                    style={styles.iconBtn}
+                    onPress={clearMessageSelection}
                   >
-                    <View style={styles.avatarSmall}>
-                      <Text style={styles.avatarSmallTxt}>
-                        {activeContact.slice(0, 2).toUpperCase()}
-                      </Text>
-                    </View>
-                    <Text style={styles.chatEmail} numberOfLines={1}>
-                      {activeContact}
-                    </Text>
+                    <Icon name="close" size={22} color="#fff" />
                   </TouchableOpacity>
-                )}
-              </View>
-              {activeContact ? (
-                <TouchableOpacity
-                  style={styles.iconBtn}
-                  onPress={() => setChatMenuOpen((v) => !v)}
-                >
-                  <Icon name="more-vert" size={22} color="#fff" />
-                </TouchableOpacity>
+                  <View
+                    style={[styles.headerCenter, { alignItems: "flex-start" }]}
+                  >
+                    <Text style={{ color: "#fff", fontWeight: "600" }}>
+                      {selectedMsgIds.size} selected
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: "row" }}>
+                    <TouchableOpacity
+                      style={styles.iconBtn}
+                      onPress={copySelected}
+                      disabled={!selectedMsgIds.size}
+                    >
+                      <Icon name="content-copy" size={18} color="#fff" />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.iconBtn}
+                      onPress={markSelectedAsRead}
+                      disabled={
+                        markingRead ||
+                        !Array.from(selectedMsgIds).some((id) => {
+                          const m = filtered.find((x) => x.id === id);
+                          return m && m.receiver_email === userEmail && !m.read;
+                        })
+                      }
+                    >
+                      {markingRead ? (
+                        <ActivityIndicator color="#fff" size="small" />
+                      ) : (
+                        <Icon name="done-all" size={20} color="#fff" />
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </>
               ) : (
-                <View style={{ width: 38 }} /> // placeholder, no profile icon
+                <>
+                  {!isWide && showContacts && <View style={{ width: 38 }} />}
+                  <View style={styles.headerCenter}>
+                    {activeContact && (
+                      <TouchableOpacity
+                        style={styles.chatInfo}
+                        onPress={fetchProfile}
+                        activeOpacity={0.8}
+                      >
+                        <View style={styles.avatarSmall}>
+                          <Text style={styles.avatarSmallTxt}>
+                            {activeContact.slice(0, 2).toUpperCase()}
+                          </Text>
+                        </View>
+                        <Text style={styles.chatEmail} numberOfLines={1}>
+                          {activeContact}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  {activeContact ? (
+                    <TouchableOpacity
+                      style={styles.iconBtn}
+                      onPress={() => setChatMenuOpen((v) => !v)}
+                    >
+                      <Icon name="more-vert" size={22} color="#fff" />
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={{ width: 38 }} />
+                  )}
+                </>
               )}
             </View>
             {chatMenuOpen && activeContact && (
@@ -486,13 +623,17 @@ export default function ChatScreen() {
             )}
             {/* Chat window */}
             <ChatWindow
-              ref={chatWindowRef} // added
+              ref={chatWindowRef}
               activeContact={activeContact}
               messages={filtered}
               currentUserEmail={userEmail}
               onRefresh={loadMessages}
               onClear={clearChat}
-              bottomInset={bottomInset} // added
+              bottomInset={bottomInset}
+              selectionMode={msgSelectionMode} // new
+              selectedIds={selectedMsgIds} // new
+              onToggleSelectMessage={toggleSelectMessage} // new
+              onStartSelection={startMessageSelection} // new
             />
             {!!error && (
               <Text

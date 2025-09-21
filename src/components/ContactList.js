@@ -219,6 +219,12 @@ export default function ContactList({
         contentContainerStyle={{ paddingBottom: 30 }}
         renderItem={({ item }) => {
           const isSel = selected.has(item.email);
+          const unreadCount = messages.filter(
+            (m) =>
+              m.sender_email === item.email &&
+              m.receiver_email === currentUserEmail &&
+              !m.read
+          ).length;
           return (
             <TouchableOpacity
               style={[styles.row, selectionMode && isSel && styles.rowSelected]}
@@ -269,13 +275,22 @@ export default function ContactList({
                 )}
               </View>
               {!selectionMode && (
-                <Text style={styles.time}>
-                  {item.lastMessageTime &&
-                    new Date(item.lastMessageTime).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                </Text>
+                <View style={{ alignItems: "flex-end", minWidth: 34 }}>
+                  <Text style={styles.time}>
+                    {item.lastMessageTime &&
+                      new Date(item.lastMessageTime).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                  </Text>
+                  {unreadCount > 0 && (
+                    <View style={styles.unreadBadge}>
+                      <Text style={styles.unreadBadgeTxt}>
+                        {unreadCount > 99 ? "99+" : unreadCount}
+                      </Text>
+                    </View>
+                  )}
+                </View>
               )}
             </TouchableOpacity>
           );
@@ -404,4 +419,15 @@ const styles = StyleSheet.create({
   rowSelected: {
     backgroundColor: "#243248",
   },
+  unreadBadge: {
+    marginTop: 4,
+    minWidth: 20,
+    paddingHorizontal: 6,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "#3a7afe",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  unreadBadgeTxt: { color: "#fff", fontSize: 11, fontWeight: "600" },
 });

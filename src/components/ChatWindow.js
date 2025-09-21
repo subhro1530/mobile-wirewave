@@ -6,7 +6,14 @@ import React, {
   forwardRef,
   useImperativeHandle,
 } from "react";
-import { View, FlatList, Text, StyleSheet, Image } from "react-native";
+import {
+  View,
+  FlatList,
+  Text,
+  StyleSheet,
+  Image,
+  TouchableOpacity,
+} from "react-native";
 import MessageBubble from "./MessageBubble";
 
 function groupByDate(list) {
@@ -33,6 +40,10 @@ export default forwardRef(function ChatWindow(
     onRefresh,
     onClear,
     bottomInset = 0,
+    selectionMode = false, // new
+    selectedIds = new Set(), // new
+    onToggleSelectMessage, // new
+    onStartSelection, // new
   },
   ref
 ) {
@@ -89,7 +100,7 @@ export default forwardRef(function ChatWindow(
         />
         <Text style={styles.placeholderSub}>
           Select or start a conversation
-        </Text> 
+        </Text>
       </View>
     );
   }
@@ -105,13 +116,31 @@ export default forwardRef(function ChatWindow(
             <View style={styles.dateWrap}>
               <Text style={styles.dateTxt}>{item.date}</Text>
             </View>
-            {item.items.map((m) => (
-              <MessageBubble
-                key={m.id}
-                message={m}
-                currentUser={{ email: currentUserEmail }}
-              />
-            ))}
+            {item.items.map((m) => {
+              const isSelected = selectedIds.has(m.id);
+              return (
+                <TouchableOpacity
+                  key={m.id}
+                  activeOpacity={selectionMode ? 0.8 : 1}
+                  onLongPress={() =>
+                    selectionMode
+                      ? onToggleSelectMessage?.(m.id)
+                      : onStartSelection?.(m.id)
+                  }
+                  delayLongPress={280}
+                  onPress={() =>
+                    selectionMode ? onToggleSelectMessage?.(m.id) : undefined
+                  }
+                >
+                  <MessageBubble
+                    message={m}
+                    currentUser={{ email: currentUserEmail }}
+                    isSelected={isSelected}
+                    selectionMode={selectionMode}
+                  />
+                </TouchableOpacity>
+              );
+            })}
           </View>
         )}
         keyboardShouldPersistTaps="handled"
