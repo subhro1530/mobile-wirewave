@@ -152,9 +152,7 @@ export default function ChatScreen() {
                 onClose={() => setShowContacts(false)}
                 logout={logout}
                 notificationsEnabled={notificationsEnabled}
-                onToggleNotifications={() =>
-                  setNotificationsEnabled((v) => !v)
-                }
+                onToggleNotifications={() => setNotificationsEnabled((v) => !v)}
               />
             </View>
           )}
