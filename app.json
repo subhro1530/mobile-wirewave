@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "mobile-wirewave",
-    "slug": "mobile-wirewave",
+    "name": "WireWave Chat",
+    "slug": "wirewave-chat",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -13,15 +13,16 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.wirewave.chat"
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#101010"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.subhro1530.mobilewirewave"
+      "package": "com.wirewave.chat"
     },
     "web": {
       "favicon": "./assets/favicon.png"
