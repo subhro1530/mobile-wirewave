@@ -10,7 +10,8 @@ import {
   Platform,
   StatusBar,
   KeyboardAvoidingView,
-  Image, // added
+  Image,
+  Keyboard, // added
 } from "react-native";
 import { TextInput } from "react-native-paper";
 import API from "../api";
@@ -29,6 +30,10 @@ export default function ChatScreen() {
   const { width } = useWindowDimensions();
   const isWide = width >= 820;
   const [showContacts, setShowContacts] = useState(true); // auto true on narrow until contact chosen
+  const [keyboardVisible, setKeyboardVisible] = useState(false); // added
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true); // added
+  const [knownContacts, setKnownContacts] = useState(new Set()); // added
+  const [newContactNotice, setNewContactNotice] = useState(null); // added
 
   const loadMessages = useCallback(async () => {
     if (!userEmail) return;
@@ -91,28 +96,52 @@ export default function ChatScreen() {
     if (!isWide && activeContact) setShowContacts(false);
   }, [activeContact, isWide]);
 
+  useEffect(() => {
+    const showSub = Keyboard.addListener("keyboardDidShow", () =>
+      setKeyboardVisible(true)
+    );
+    const hideSub = Keyboard.addListener("keyboardDidHide", () =>
+      setKeyboardVisible(false)
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  // Track new contacts for notification
+  useEffect(() => {
+    const current = new Set();
+    messages.forEach((m) => {
+      const peer =
+        m.sender_email === userEmail ? m.receiver_email : m.sender_email;
+      if (peer && peer !== userEmail) current.add(peer);
+    });
+    if (knownContacts.size && notificationsEnabled) {
+      current.forEach((c) => {
+        if (!knownContacts.has(c)) {
+          setNewContactNotice(c);
+          setTimeout(() => setNewContactNotice(null), 4000);
+        }
+      });
+    }
+    setKnownContacts(current);
+  }, [messages, userEmail, notificationsEnabled, knownContacts]);
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : "padding"} // changed: use padding on Android too
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         keyboardVerticalOffset={
-          Platform.OS === "android" ? StatusBar.currentHeight || 0 : 0
+          Platform.OS === "ios" ? 0 : StatusBar.currentHeight || 0
         }
       >
         <View style={styles.root}>
           {/* Contacts Panel */}
           {(isWide || showContacts) && (
             <View style={[styles.contactsPane, !isWide && styles.overlay]}>
-              {!isWide && activeContact && (
-                <TouchableOpacity
-                  style={styles.closeOverlay}
-                  onPress={() => setShowContacts(false)}
-                  accessibilityLabel="Close contacts panel"
-                >
-                  <Icon name="close" size={20} color="#fff" />
-                </TouchableOpacity>
-              )}
+              {/* top bar & menu handled inside ContactList now */}
               <ContactList
                 messages={messages}
                 currentUserEmail={userEmail}
@@ -121,6 +150,11 @@ export default function ChatScreen() {
                   if (!isWide) setShowContacts(false);
                 }}
                 onClose={() => setShowContacts(false)}
+                logout={logout}
+                notificationsEnabled={notificationsEnabled}
+                onToggleNotifications={() =>
+                  setNotificationsEnabled((v) => !v)
+                }
               />
             </View>
           )}
@@ -151,10 +185,16 @@ export default function ChatScreen() {
                   </View>
                 )}
               </View>
-              <TouchableOpacity style={styles.iconBtn} onPress={logout}>
-                <Icon name="logout" size={22} color="#fff" />
-              </TouchableOpacity>
+              {/* removed logout icon (in sidebar menu) */}
+              <View style={{ width: 38 }} />
             </View>
+            {newContactNotice && (
+              <View style={styles.noticeBanner}>
+                <Text style={styles.noticeText}>
+                  New conversation: {newContactNotice}
+                </Text>
+              </View>
+            )}
             {/* Chat window */}
             <ChatWindow
               activeContact={activeContact}
@@ -175,7 +215,12 @@ export default function ChatScreen() {
               </Text>
             )}
             {activeContact && (
-              <View style={styles.composer}>
+              <View
+                style={[
+                  styles.composer,
+                  !keyboardVisible && styles.composerAtRest, // added conditional margin
+                ]}
+              >
                 <TextInput
                   value={text}
                   mode="flat"
@@ -300,10 +345,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 10,
-    paddingVertical: 4, // slightly reduced
+    paddingVertical: 4,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: "#222",
     backgroundColor: "#161616",
+  },
+  composerAtRest: {
+    marginBottom: 6, // spacing when keyboard hidden
   },
   input: {
     flex: 1,
@@ -320,4 +368,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  noticeBanner: {
+    backgroundColor: "#233b70",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#2b4d92",
+  },
+  noticeText: { color: "#fff", fontSize: 12 },
 });
