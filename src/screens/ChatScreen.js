@@ -110,11 +110,7 @@ export default function ChatScreen() {
                   onPress={() => setShowContacts(false)}
                   accessibilityLabel="Close contacts panel"
                 >
-                  <Image
-                    source={require("../../assets/icon.png")}
-                    style={styles.closeIcon}
-                    resizeMode="contain"
-                  />
+                  <Icon name="close" size={20} color="#fff" />
                 </TouchableOpacity>
               )}
               <ContactList
@@ -141,7 +137,20 @@ export default function ChatScreen() {
                   <Icon name="menu" size={22} color="#fff" />
                 </TouchableOpacity>
               )}
-              <View style={{ flex: 1 }} />
+              <View style={styles.headerCenter}>
+                {activeContact && (
+                  <View style={styles.chatInfo}>
+                    <View style={styles.avatarSmall}>
+                      <Text style={styles.avatarSmallTxt}>
+                        {activeContact.slice(0, 2).toUpperCase()}
+                      </Text>
+                    </View>
+                    <Text style={styles.chatEmail} numberOfLines={1}>
+                      {activeContact}
+                    </Text>
+                  </View>
+                )}
+              </View>
               <TouchableOpacity style={styles.iconBtn} onPress={logout}>
                 <Icon name="logout" size={22} color="#fff" />
               </TouchableOpacity>
@@ -241,12 +250,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#1d1d1d",
     alignItems: "flex-end",
   },
-  closeIcon: {
-    width: 18,
-    height: 18,
-    tintColor: "#fff",
-  },
-  chatPane: { flex: 1 },
   headerBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -256,6 +259,34 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "#222",
   },
+  headerCenter: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 10,
+  },
+  chatInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    maxWidth: "90%",
+  },
+  avatarSmall: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "#3a7afe",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 8,
+  },
+  avatarSmallTxt: { color: "#fff", fontSize: 12, fontWeight: "600" },
+  chatEmail: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600",
+    maxWidth: 180,
+  },
+  chatPane: { flex: 1 },
   iconBtn: {
     width: 38,
     height: 38,
