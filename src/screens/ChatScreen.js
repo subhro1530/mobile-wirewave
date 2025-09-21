@@ -16,8 +16,7 @@ import {
   Platform,
   StatusBar,
   KeyboardAvoidingView,
-  Image,
-  Keyboard, // added
+  Keyboard,
 } from "react-native";
 import { TextInput } from "react-native-paper";
 import API from "../api";
@@ -40,6 +39,10 @@ export default function ChatScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true); // added
   const knownContactsRef = useRef(new Set()); // stable ref
   const [newContactNotice, setNewContactNotice] = useState(null); // added
+  const [keyboardHeight, setKeyboardHeight] = useState(0); // added
+  const [composerHeight, setComposerHeight] = useState(52); // added default
+  const chatListRef = useRef(null); // optional future use
+  const chatWindowRef = useRef(null); // added
 
   const loadMessages = useCallback(async () => {
     if (!userEmail) return;
@@ -78,6 +81,7 @@ export default function ChatScreen() {
       });
       setText("");
       await loadMessages();
+      chatWindowRef.current?.scrollToBottom?.(); // ensure bottom after send
     } finally {
       setLoading(false);
     }
@@ -103,12 +107,19 @@ export default function ChatScreen() {
   }, [activeContact, isWide]);
 
   useEffect(() => {
-    const showSub = Keyboard.addListener("keyboardDidShow", () =>
-      setKeyboardVisible(true)
-    );
-    const hideSub = Keyboard.addListener("keyboardDidHide", () =>
-      setKeyboardVisible(false)
-    );
+    const showSub = Keyboard.addListener("keyboardDidShow", (e) => {
+      setKeyboardHeight(
+        Platform.OS === "android" ? e.endCoordinates.height : 0
+      );
+      chatWindowRef.current?.scrollToBottom?.(); // scroll when keyboard appears
+      // slight delay then force scroll (if ChatWindow already auto scrolls it is harmless)
+      setTimeout(() => {
+        // ChatWindow internally auto-scrolls; extra safeguard
+      }, 60);
+    });
+    const hideSub = Keyboard.addListener("keyboardDidHide", () => {
+      setKeyboardHeight(0);
+    });
     return () => {
       showSub.remove();
       hideSub.remove();
@@ -141,6 +152,8 @@ export default function ChatScreen() {
     }
   }, [messages, userEmail, notificationsEnabled]); // removed knownContacts from deps
 
+  const bottomInset = composerHeight + 8; // space for last bubble
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar
@@ -150,10 +163,8 @@ export default function ChatScreen() {
       />
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={
-          Platform.OS === "ios" ? 0 : StatusBar.currentHeight || 0
-        }
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={0}
       >
         <View style={styles.root}>
           {/* Contacts Panel */}
@@ -213,11 +224,13 @@ export default function ChatScreen() {
             )}
             {/* Chat window */}
             <ChatWindow
+              ref={chatWindowRef} // added
               activeContact={activeContact}
               messages={filtered}
               currentUserEmail={userEmail}
               onRefresh={loadMessages}
               onClear={clearChat}
+              bottomInset={bottomInset} // added
             />
             {!!error && (
               <Text
@@ -232,9 +245,12 @@ export default function ChatScreen() {
             )}
             {activeContact && (
               <View
+                onLayout={(e) => setComposerHeight(e.nativeEvent.layout.height)}
                 style={[
-                  styles.composer,
-                  !keyboardVisible && styles.composerAtRest, // added conditional margin
+                  styles.composerFixed,
+                  {
+                    bottom: Platform.OS === "android" ? keyboardHeight : 0,
+                  },
                 ]}
               >
                 <TextInput
@@ -358,25 +374,25 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginRight: 8,
   },
-  composer: {
+  composerFixed: {
+    position: "absolute",
+    left: 0,
+    right: 0,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 10,
-    paddingVertical: 6, // slightly bigger than 4 for balance
+    paddingVertical: 8,
+    backgroundColor: "#161616",
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: "#222",
-    backgroundColor: "#161616",
-  },
-  composerAtRest: {
-    // removed bottom margin to eliminate white strip
-    marginBottom: 0,
   },
   input: {
     flex: 1,
     backgroundColor: "#222",
     color: "#fff",
     paddingHorizontal: 10,
-    height: 40, // tighter field
+    height: 40,
+    marginRight: 8,
   },
   sendBtn: {
     width: 40,
