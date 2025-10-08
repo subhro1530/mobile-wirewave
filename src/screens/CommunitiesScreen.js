@@ -44,6 +44,7 @@ export default function CommunitiesScreen() {
   const [content, setContent] = useState("");
   const [showInfo, setShowInfo] = useState(false);
   const [broadcastVisible, setBroadcastVisible] = useState(false); // NEW (replaces always-on UI)
+  const [lastBroadcastInfo, setLastBroadcastInfo] = useState(null); // { at: Date, count: number }
 
   const loadMessages = useCallback(async () => {
     try {
@@ -102,17 +103,21 @@ export default function CommunitiesScreen() {
 
   const sendBroadcast = async () => {
     const emails = Array.from(selected);
-    if (!emails.length || !content.trim()) {
-      Alert.alert("Missing", "Select recipients & enter a message.");
+    if (!emails.length) {
+      Alert.alert("Missing", "Select at least one recipient.");
       return;
     }
+    // Custom message logic (ignore empty -> fallback)
+    const userTyped = content.trim();
+    const finalContent = `📢 ${userTyped || "Broadcast message sent"}`; // changed prefix
     setSending(true);
     try {
       await API.post("/messages/multi", {
         receiver_emails: emails,
-        content: content.trim(),
+        content: finalContent,
       });
-      Alert.alert("Success", "Broadcast sent");
+      // inline success note instead of Alert
+      setLastBroadcastInfo({ at: Date.now(), count: emails.length });
       setContent("");
       setSelected(new Set());
     } catch (e) {
@@ -136,7 +141,7 @@ export default function CommunitiesScreen() {
           style={styles.iconBtn}
           onPress={() => setBroadcastVisible(true)}
         >
-          <Icon name="mic" size={20} color="#fff" />
+          <Icon name="campaign" size={20} color="#fff" /> {/* was mic */}
         </TouchableOpacity>
       </View>
 
@@ -248,31 +253,36 @@ export default function CommunitiesScreen() {
               }
             />
           )}
+          {/* Inline success feedback */}
+          {lastBroadcastInfo && (
+            <Text style={styles.successNote}>
+              Sent to {lastBroadcastInfo.count} contact
+              {lastBroadcastInfo.count === 1 ? "" : "s"} just now
+            </Text>
+          )}
           <Text style={styles.countTxt}>{selected.size} selected</Text>
           <View style={styles.messageBox}>
             <TextInput
               style={styles.messageInput}
               multiline
-              placeholder="Broadcast message"
+              placeholder="Broadcast message (leave empty for default)"
               placeholderTextColor="#5f6d7c"
               value={content}
               onChangeText={setContent}
-              selectionColor="#3a7afe" // added
+              selectionColor="#3a7afe"
             />
             <TouchableOpacity
               style={[
                 styles.sendBtn,
-                (!content.trim() || !selected.size || sending) && {
-                  opacity: 0.45,
-                },
+                (!selected.size || sending) && { opacity: 0.45 },
               ]}
-              disabled={!content.trim() || !selected.size || sending}
+              disabled={!selected.size || sending}
               onPress={sendBroadcast}
             >
               {sending ? (
                 <ActivityIndicator color="#fff" size="small" />
               ) : (
-                <Icon name="send" size={18} color="#fff" />
+                <Icon name="campaign" size={20} color="#fff" /> 
               )}
             </TouchableOpacity>
           </View>
@@ -414,4 +424,11 @@ const styles = StyleSheet.create({
   },
   infoTitle: { color: C.text, fontSize: 16, fontWeight: "700" },
   infoBody: { color: C.sub, fontSize: 13, lineHeight: 18, marginTop: 8 },
+  successNote: {
+    color: "#4cc790",
+    fontSize: 11,
+    marginTop: 4,
+    marginLeft: 6,
+    marginBottom: 2,
+  },
 });

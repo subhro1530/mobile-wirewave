@@ -73,6 +73,7 @@ export default function ChatScreen() {
   const debounceRef = useRef(null); // NEW debounce timer
   const [toast, setToast] = useState(null); // { msg, type } type: 'success'|'error'
   const toastTimerRef = useRef(null);
+  const [showStarredOnly, setShowStarredOnly] = useState(false); // NEW state
 
   // === AUTO EMAIL EXISTENCE CHECK (debounced) ===
   useEffect(() => {
@@ -213,11 +214,13 @@ export default function ChatScreen() {
   }, [messages, userEmail, archivedChats, showArchivedView, starredChats]);
 
   // Filter contacts by search
-  const filtered = contacts.filter(
-    (c) =>
-      c.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (c.lastMessage || "").toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filtered = contacts
+    .filter(
+      (c) =>
+        c.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (c.lastMessage || "").toLowerCase().includes(searchQuery.toLowerCase())
+    )
+    .filter((c) => (!showStarredOnly ? true : starredChats.has(c.email)));
 
   // Unified profile open
   const openProfile = useCallback(
@@ -532,10 +535,38 @@ export default function ChatScreen() {
             />
             <Text style={[styles.menuTxt, { color: "#ff6b6b" }]}>Logout</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => {
+              setShowMenu(false);
+              setShowStarredOnly((v) => !v);
+            }}
+          >
+            <Icon
+              name={showStarredOnly ? "star-outline" : "star"}
+              size={16}
+              color="#ffc94d"
+              style={styles.menuIcon}
+            />
+            <Text style={styles.menuTxt}>
+              {showStarredOnly ? "All Chats" : "Starred Chats"}
+            </Text>
+          </TouchableOpacity>
         </View>
       )}
 
       {/* Chats List */}
+      {showStarredOnly && (
+        <View style={styles.starredBanner}>
+          <Icon
+            name="star"
+            size={14}
+            color="#ffc94d"
+            style={{ marginRight: 6 }}
+          />
+          <Text style={styles.starredBannerTxt}>Showing starred chats</Text>
+        </View>
+      )}
       <FlatList
         data={filtered}
         keyExtractor={(item) => item.email}
@@ -1379,4 +1410,22 @@ const styles = StyleSheet.create({
     borderColor: "#7d3a3a",
   },
   toastTxt: { color: "#fff", fontSize: 13, flexShrink: 1 },
+  starredBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#1c2e44",
+    marginHorizontal: 12,
+    marginTop: 6,
+    marginBottom: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#27415c",
+  },
+  starredBannerTxt: {
+    color: "#d5e6ff",
+    fontSize: 11,
+    fontWeight: "500",
+  },
 });

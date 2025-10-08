@@ -21,6 +21,9 @@ export default function MessageBubble({
 }) {
   const isMine = message.sender_email === currentUser.email;
   const read = !!message.read;
+  const isBroadcast =
+    typeof message.content === "string" &&
+    (message.content.startsWith("📢") || message.content.startsWith("🎤"));
   return (
     <View style={[styles.row, isMine ? styles.rowRight : styles.rowLeft]}>
       <View
@@ -28,6 +31,7 @@ export default function MessageBubble({
           styles.wrap,
           isMine && styles.wrapMine,
           !isMine && styles.wrapOther,
+          isBroadcast && styles.broadcastWrap,
           isSelected && styles.wrapSelected,
         ]}
       >
@@ -35,8 +39,11 @@ export default function MessageBubble({
           style={[
             styles.bubble,
             isMine ? styles.bubbleMine : styles.bubbleOther,
+            isBroadcast &&
+              (isMine ? styles.broadcastMine : styles.broadcastOther),
           ]}
         >
+          {isBroadcast && <Text style={styles.broadcastTag}>BROADCAST</Text>}
           <Text style={styles.text}>{message.content}</Text>
           <View style={styles.metaRow}>
             <Text style={styles.time}>
@@ -95,5 +102,26 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     alignItems: "center",
     marginTop: 2,
+  },
+  broadcastWrap: {
+    shadowColor: "#3a7afe",
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  broadcastMine: {
+    borderWidth: 1,
+    borderColor: "#8fb8ff",
+  },
+  broadcastOther: {
+    borderWidth: 1,
+    borderColor: "#3a7afe",
+  },
+  broadcastTag: {
+    fontSize: 9,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    color: "#b9d4ff",
+    marginBottom: 4,
   },
 });
