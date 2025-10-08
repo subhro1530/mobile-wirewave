@@ -44,6 +44,7 @@ function MainTabs() {
         },
         tabBarActiveTintColor: BRAND_PRIMARY,
         tabBarInactiveTintColor: "#7c8aa8",
+        tabBarItemStyle: { paddingVertical: 4 },
         tabBarIcon: ({ color, size }) => {
           if (route.name === "Chats")
             return <Icon name="chat" color={color} size={size} />;

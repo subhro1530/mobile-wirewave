@@ -67,7 +67,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", marginBottom: 6, paddingHorizontal: 4 },
   rowLeft: { justifyContent: "flex-start" },
   rowRight: { justifyContent: "flex-end" },
-  wrap: { position: "relative", maxWidth: "78%" },
+  wrap: { position: "relative", maxWidth: "90%" }, // widened
   wrapMine: { alignSelf: "flex-end" },
   wrapOther: { alignSelf: "flex-start" },
   wrapSelected: {
@@ -78,7 +78,7 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   bubble: {
-    maxWidth: "78%",
+    // remove internal maxWidth constraint
     paddingVertical: 8,
     paddingHorizontal: 14,
     borderRadius: 16,

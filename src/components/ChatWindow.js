@@ -181,7 +181,7 @@ export default forwardRef(function ChatWindow(
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  list: { padding: 10, paddingBottom: 40, backgroundColor: "transparent" },
+  list: { padding: 12, paddingBottom: 50, backgroundColor: "transparent" }, // increased side padding
   dateWrap: {
     alignSelf: "center",
     paddingHorizontal: 12,

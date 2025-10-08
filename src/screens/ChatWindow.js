@@ -27,7 +27,7 @@ import Icon from "react-native-vector-icons/MaterialIcons";
 import ChatWindow from "../components/ChatWindow";
 
 const COLORS = {
-  bar: "#008069",
+  bar: "#14233a", // changed from green
   bg: "#0b141a",
   bgInput: "#1f2c34",
   accent: "#25D366",
@@ -173,9 +173,17 @@ export default function ChatWindowScreen() {
           <Icon name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
         <View style={styles.headerAvatar}>
-          <Text style={styles.headerAvatarTxt}>
-            {contact?.slice(0, 2)?.toUpperCase()}
-          </Text>
+          <TouchableOpacity
+            style={{ flex: 1, alignItems: "center", justifyContent: "center" }}
+            onPress={() => {
+              // open profile from here by simple alert style fallback
+              Alert.alert("Contact", contact);
+            }}
+          >
+            <Text style={styles.headerAvatarTxt}>
+              {contact?.slice(0, 2)?.toUpperCase()}
+            </Text>
+          </TouchableOpacity>
         </View>
         <View style={{ flex: 1, paddingRight: 8 }}>
           <Text style={styles.contactName} numberOfLines={1}>
@@ -338,10 +346,10 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: "row",
     alignItems: "flex-end",
-    paddingTop: (StatusBar.currentHeight || 0) + 6,
+    paddingTop: (StatusBar.currentHeight || 0) + 4,
     paddingBottom: 8,
     paddingHorizontal: 4,
-    backgroundColor: COLORS.bar,
+    backgroundColor: COLORS.bar, // updated
   },
   iconBtn: {
     width: 40,

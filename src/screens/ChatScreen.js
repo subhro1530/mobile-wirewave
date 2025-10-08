@@ -24,6 +24,7 @@ import { AuthContext } from "../AuthContext";
 import Icon from "react-native-vector-icons/MaterialIcons";
 import { useNavigation } from "@react-navigation/native";
 import { TextInput } from "react-native-paper";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // Replace STYLE palette + UI layout
 const PALETTE = {
@@ -54,73 +55,21 @@ export default function ChatScreen() {
   const [broadcastRecipients, setBroadcastRecipients] = useState(""); // new
   const [broadcastContent, setBroadcastContent] = useState(""); // new
   const [sendingBroadcast, setSendingBroadcast] = useState(false); // new
+  const [archivedChats, setArchivedChats] = useState(new Set()); // new
+  const [showArchivedView, setShowArchivedView] = useState(false); // new
+  const [starredChats, setStarredChats] = useState(new Set()); // new
+  const [chatActionEmail, setChatActionEmail] = useState(null); // long-press target
+  const [chatActionVisible, setChatActionVisible] = useState(false); // long-press modal
+  const [profileViewingEmail, setProfileViewingEmail] = useState(null); // which profile
+  const [profileEditMode, setProfileEditMode] = useState(false); // edit toggle
+  const [profileForm, setProfileForm] = useState({
+    name: "",
+    about: "",
+    avatar_url: "",
+  }); // form
   const navigation = useNavigation();
 
-  // Load messages
-  const loadMessages = useCallback(async () => {
-    if (!userEmail) return;
-    try {
-      setError(null);
-      const res = await API.get("/messages");
-      setMessages(res.data || []);
-    } catch (e) {
-      setError(e?.message || "Failed to load");
-    }
-  }, [userEmail]);
-
-  useEffect(() => {
-    loadMessages();
-    const interval = setInterval(loadMessages, 4000);
-    return () => clearInterval(interval);
-  }, [loadMessages]);
-
-  // Derive contacts from messages
-  const contacts = React.useMemo(() => {
-    const map = new Map();
-    messages.forEach((m) => {
-      const peer =
-        m.sender_email === userEmail ? m.receiver_email : m.sender_email;
-      if (!peer || peer === userEmail) return;
-      const existing = map.get(peer);
-      if (
-        !existing ||
-        new Date(m.sent_at) > new Date(existing.lastMessageTime || 0)
-      ) {
-        map.set(peer, {
-          email: peer,
-          lastMessage: m.content,
-          lastMessageTime: m.sent_at,
-        });
-      }
-    });
-    return Array.from(map.values()).sort(
-      (a, b) => new Date(b.lastMessageTime) - new Date(a.lastMessageTime)
-    );
-  }, [messages, userEmail]);
-
-  // Filter contacts by search
-  const filtered = contacts.filter(
-    (c) =>
-      c.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (c.lastMessage || "").toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  // Profile modal logic
-  const openProfileModal = useCallback(async () => {
-    setProfileModalVisible(true);
-    setProfileLoading(true);
-    setProfileError(null);
-    setProfileData(null);
-    try {
-      const { data } = await API.get("/profile");
-      setProfileData(data);
-    } catch (e) {
-      setProfileError(e.message);
-    } finally {
-      setProfileLoading(false);
-    }
-  }, []);
-
+  // === Added missing callbacks ===
   const testConnection = useCallback(async () => {
     try {
       const { data } = await API.get("/testdb");
@@ -130,7 +79,7 @@ export default function ChatScreen() {
     }
   }, []);
 
-  const deleteAccount = useCallback(async () => {
+  const deleteAccount = useCallback(() => {
     Alert.alert("Delete Account", "This cannot be undone. Continue?", [
       { text: "Cancel", style: "cancel" },
       {
@@ -174,6 +123,218 @@ export default function ChatScreen() {
       setSendingBroadcast(false);
     }
   }, [broadcastRecipients, broadcastContent, userEmail, loadMessages]);
+
+  // Load messages
+  const loadMessages = useCallback(async () => {
+    if (!userEmail) return;
+    try {
+      setError(null);
+      const res = await API.get("/messages");
+      setMessages(res.data || []);
+    } catch (e) {
+      setError(e?.message || "Failed to load");
+    }
+  }, [userEmail]);
+
+  useEffect(() => {
+    loadMessages();
+    const interval = setInterval(loadMessages, 4000);
+    return () => clearInterval(interval);
+  }, [loadMessages]);
+
+  // Load archived & starred sets
+  useEffect(() => {
+    (async () => {
+      try {
+        const [a, s] = await AsyncStorage.multiGet([
+          "archivedChats",
+          "starredChats",
+        ]);
+        if (a?.[1]) setArchivedChats(new Set(JSON.parse(a[1])));
+        if (s?.[1]) setStarredChats(new Set(JSON.parse(s[1])));
+      } catch {}
+    })();
+  }, []);
+
+  // Persist archives & stars
+  useEffect(() => {
+    AsyncStorage.setItem(
+      "archivedChats",
+      JSON.stringify(Array.from(archivedChats))
+    ).catch(() => {});
+  }, [archivedChats]);
+  useEffect(() => {
+    AsyncStorage.setItem(
+      "starredChats",
+      JSON.stringify(Array.from(starredChats))
+    ).catch(() => {});
+  }, [starredChats]);
+
+  // Derive contacts from messages
+  const contacts = React.useMemo(() => {
+    const map = new Map();
+    messages.forEach((m) => {
+      const peer =
+        m.sender_email === userEmail ? m.receiver_email : m.sender_email;
+      if (!peer || peer === userEmail) return;
+      const existing = map.get(peer);
+      if (
+        !existing ||
+        new Date(m.sent_at) > new Date(existing.lastMessageTime || 0)
+      ) {
+        map.set(peer, {
+          email: peer,
+          lastMessage: m.content,
+          lastMessageTime: m.sent_at,
+        });
+      }
+    });
+    let list = Array.from(map.values());
+    // Separate archives
+    list = list.filter((c) =>
+      showArchivedView
+        ? archivedChats.has(c.email)
+        : !archivedChats.has(c.email)
+    );
+    // Star priority
+    list.sort((a, b) => {
+      const aStar = starredChats.has(a.email);
+      const bStar = starredChats.has(b.email);
+      if (aStar && !bStar) return -1;
+      if (bStar && !aStar) return 1;
+      return new Date(b.lastMessageTime) - new Date(a.lastMessageTime);
+    });
+    return list;
+  }, [messages, userEmail, archivedChats, showArchivedView, starredChats]);
+
+  // Filter contacts by search
+  const filtered = contacts.filter(
+    (c) =>
+      c.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (c.lastMessage || "").toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  // Unified profile open
+  const openProfile = useCallback(
+    async (email, allowEdit = false) => {
+      setProfileViewingEmail(email);
+      setProfileModalVisible(true);
+      setProfileLoading(true);
+      setProfileError(null);
+      setProfileData(null);
+      setProfileEditMode(false);
+      try {
+        if (email === userEmail) {
+          // current user profile
+          const { data } = await API.get("/profile");
+          setProfileData(data);
+          setProfileForm({
+            name: data?.name || "",
+            about: data?.about || "",
+            avatar_url: data?.avatar_url || "",
+          });
+          if (allowEdit) setProfileEditMode(true);
+        } else {
+          const { data } = await API.get(
+            `/users/search?email=${encodeURIComponent(email)}`
+          );
+          setProfileData(data);
+        }
+      } catch (e) {
+        setProfileError(e.message);
+      } finally {
+        setProfileLoading(false);
+      }
+    },
+    [userEmail]
+  );
+
+  // Override old openProfileModal (for menu "My Profile")
+  const openProfileModal = useCallback(
+    () => openProfile(userEmail, false),
+    [openProfile, userEmail]
+  );
+
+  const enableEditMyProfile = () => {
+    if (profileViewingEmail === userEmail) setProfileEditMode(true);
+  };
+
+  const saveMyProfile = useCallback(async () => {
+    if (profileViewingEmail !== userEmail) return;
+    try {
+      setProfileLoading(true);
+      setProfileError(null);
+      const method = profileData ? "put" : "post";
+      const payload = {
+        name: profileForm.name.trim(),
+        about: profileForm.about.trim(),
+        avatar_url: profileForm.avatar_url.trim(),
+      };
+      const { data } = await API[method]("/profile", payload);
+      setProfileData(data);
+      setProfileEditMode(false);
+      Alert.alert("Saved", "Profile updated");
+    } catch (e) {
+      setProfileError(e.message);
+    } finally {
+      setProfileLoading(false);
+    }
+  }, [profileViewingEmail, userEmail, profileForm, profileData]);
+
+  // Chat actions
+  const toggleArchive = useCallback((email) => {
+    setArchivedChats((prev) => {
+      const next = new Set(prev);
+      next.has(email) ? next.delete(email) : next.add(email);
+      return next;
+    });
+    setChatActionVisible(false);
+  }, []);
+  const toggleStar = useCallback((email) => {
+    setStarredChats((prev) => {
+      const next = new Set(prev);
+      next.has(email) ? next.delete(email) : next.add(email);
+      return next;
+    });
+    setChatActionVisible(false);
+  }, []);
+  const deleteChat = useCallback(
+    async (email) => {
+      try {
+        await API.delete(`/messages/${encodeURIComponent(email)}`);
+        setMessages((prev) =>
+          prev.filter(
+            (m) =>
+              !(
+                (m.sender_email === userEmail && m.receiver_email === email) ||
+                (m.receiver_email === userEmail && m.sender_email === email)
+              )
+          )
+        );
+        setArchivedChats((prev) => {
+          const next = new Set(prev);
+          next.delete(email);
+          return next;
+        });
+        setStarredChats((prev) => {
+          const next = new Set(prev);
+          next.delete(email);
+          return next;
+        });
+      } catch (e) {
+        Alert.alert("Error", e.message);
+      } finally {
+        setChatActionVisible(false);
+      }
+    },
+    [userEmail]
+  );
+
+  // Long press handler
+  const onLongPressChat = (email) => {
+    setChatActionEmail(email);
+    setChatActionVisible(true);
+  };
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: PALETTE.bg }]}>
@@ -235,10 +396,19 @@ export default function ChatScreen() {
             style={styles.menuItem}
             onPress={() => {
               setShowMenu(false);
-              openProfileModal();
+              openProfile(userEmail, false);
             }}
           >
             <Text style={styles.menuTxt}>My Profile</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => {
+              setShowMenu(false);
+              openProfile(userEmail, true);
+            }}
+          >
+            <Text style={styles.menuTxt}>Edit My Profile</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.menuItem}
@@ -288,8 +458,13 @@ export default function ChatScreen() {
         contentContainerStyle={{ paddingBottom: 100 }}
         ListHeaderComponent={
           <View>
-            {/* Archived stub */}
-            <TouchableOpacity style={styles.archivedRow}>
+            <TouchableOpacity
+              style={styles.archivedRow}
+              onPress={() => {
+                if (!showArchivedView) setShowArchivedView(true);
+                else setShowArchivedView(false);
+              }}
+            >
               <Icon
                 name="archive"
                 size={22}
@@ -297,13 +472,23 @@ export default function ChatScreen() {
                 style={{ marginRight: 16 }}
               />
               <View style={{ flex: 1 }}>
-                <Text style={styles.archivedText}>Archived</Text>
-                <Text style={styles.archivedSub}>0 chats</Text>
+                <Text style={styles.archivedText}>
+                  {showArchivedView
+                    ? "Chats"
+                    : `Archived (${archivedChats.size})`}
+                </Text>
+                <Text style={styles.archivedSub}>
+                  {showArchivedView
+                    ? "Return to all chats"
+                    : "Long press chat to archive"}
+                </Text>
               </View>
             </TouchableOpacity>
-            <Text style={styles.hintTxt}>
-              Tap and hold a chat for more options
-            </Text>
+            {!showArchivedView && (
+              <Text style={styles.hintTxt}>
+                Tap and hold a chat for options
+              </Text>
+            )}
           </View>
         }
         renderItem={({ item }) => {
@@ -313,34 +498,47 @@ export default function ChatScreen() {
               m.receiver_email === userEmail &&
               !m.read
           ).length;
+          const starred = starredChats.has(item.email);
           return (
-            <TouchableOpacity
-              style={styles.row}
-              onPress={() =>
-                navigation.navigate("ChatWindow", { contact: item.email })
-              }
-              onLongPress={() => {
-                // placeholder for future contextual menu
-              }}
-              delayLongPress={300}
-            >
-              <View style={styles.avatar}>
+            <View style={styles.row}>
+              <TouchableOpacity
+                style={styles.avatar}
+                onPress={() => openProfile(item.email, false)}
+              >
                 <Text style={styles.avatarTxt}>
                   {item.email.slice(0, 2).toUpperCase()}
                 </Text>
-              </View>
-              <View style={{ flex: 1 }}>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ flex: 1 }}
+                activeOpacity={0.85}
+                onPress={() =>
+                  navigation.navigate("ChatWindow", { contact: item.email })
+                }
+                onLongPress={() => onLongPressChat(item.email)}
+                delayLongPress={320}
+              >
                 <View style={styles.rowTop}>
                   <Text style={styles.name} numberOfLines={1}>
                     {item.email}
                   </Text>
-                  <Text style={styles.time}>
-                    {item.lastMessageTime &&
-                      new Date(item.lastMessageTime).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                  </Text>
+                  <View style={{ flexDirection: "row", alignItems: "center" }}>
+                    {starred && (
+                      <Icon
+                        name="star"
+                        size={14}
+                        color={PALETTE.brandAccent}
+                        style={{ marginRight: 4 }}
+                      />
+                    )}
+                    <Text style={styles.time}>
+                      {item.lastMessageTime &&
+                        new Date(item.lastMessageTime).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                    </Text>
+                  </View>
                 </View>
                 <View style={styles.rowBottom}>
                   <Text
@@ -358,8 +556,8 @@ export default function ChatScreen() {
                     </View>
                   )}
                 </View>
-              </View>
-            </TouchableOpacity>
+              </TouchableOpacity>
+            </View>
           );
         }}
         ListEmptyComponent={
@@ -388,16 +586,103 @@ export default function ChatScreen() {
         <Icon name="chat" size={26} color="#fff" />
       </TouchableOpacity>
 
-      {/* Profile Modal */}
+      {/* Chat long-press action modal */}
+      <Modal
+        transparent
+        visible={chatActionVisible}
+        animationType="fade"
+        onRequestClose={() => setChatActionVisible(false)}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setChatActionVisible(false)}
+        >
+          <View />
+        </Pressable>
+        <View style={[styles.actionSheet]}>
+          <Text style={styles.sheetTitle}>{chatActionEmail}</Text>
+          <TouchableOpacity
+            style={styles.sheetBtn}
+            onPress={() => toggleStar(chatActionEmail)}
+          >
+            <Icon
+              name={starredChats.has(chatActionEmail) ? "star" : "star-border"}
+              size={16}
+              color="#ffd54f"
+              style={{ marginRight: 8 }}
+            />
+            <Text style={styles.sheetBtnTxt}>
+              {starredChats.has(chatActionEmail) ? "Unstar" : "Star"}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.sheetBtn}
+            onPress={() => toggleArchive(chatActionEmail)}
+          >
+            <Icon
+              name={
+                archivedChats.has(chatActionEmail) ? "unarchive" : "archive"
+              }
+              size={16}
+              color="#75b4ff"
+              style={{ marginRight: 8 }}
+            />
+            <Text style={styles.sheetBtnTxt}>
+              {archivedChats.has(chatActionEmail) ? "Unarchive" : "Archive"}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.sheetBtn}
+            onPress={() => {
+              setChatActionVisible(false);
+              openProfile(chatActionEmail, false);
+            }}
+          >
+            <Icon
+              name="person"
+              size={16}
+              color="#3a7afe"
+              style={{ marginRight: 8 }}
+            />
+            <Text style={styles.sheetBtnTxt}>View Profile</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.sheetBtn}
+            onPress={() => deleteChat(chatActionEmail)}
+          >
+            <Icon
+              name="delete"
+              size={16}
+              color="#ff6666"
+              style={{ marginRight: 8 }}
+            />
+            <Text style={[styles.sheetBtnTxt, { color: "#ff6666" }]}>
+              Delete Chat
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.sheetBtn, { justifyContent: "center" }]}
+            onPress={() => setChatActionVisible(false)}
+          >
+            <Text style={[styles.sheetBtnTxt, { color: "#8696a0" }]}>
+              Cancel
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
+      {/* Profile Modal updated for edit */}
       <Modal
         transparent
         visible={profileModalVisible}
         animationType="fade"
-        onRequestClose={() => setProfileModalVisible(false)}
+        onRequestClose={() => {
+          if (!profileLoading) setProfileModalVisible(false);
+        }}
       >
         <Pressable
           style={styles.modalBackdrop}
-          onPress={() => setProfileModalVisible(false)}
+          onPress={() => !profileLoading && setProfileModalVisible(false)}
         >
           <View />
         </Pressable>
@@ -406,29 +691,87 @@ export default function ChatScreen() {
             <ActivityIndicator color="#3a7afe" />
           ) : profileError ? (
             <Text style={{ color: "#f55" }}>{profileError}</Text>
-          ) : profileData ? (
-            <>
-              {profileData.avatar_url ? (
-                <Image
-                  source={{ uri: profileData.avatar_url }}
-                  style={styles.profileAvatar}
-                />
-              ) : null}
-              <Text style={styles.profileEmail}>{userEmail}</Text>
-              {profileData.name ? (
-                <Text style={styles.profileName}>{profileData.name}</Text>
-              ) : null}
-              {profileData.about ? (
-                <Text style={styles.profileAbout}>{profileData.about}</Text>
-              ) : null}
-              {profileData.avatar_url ? (
-                <Text style={styles.profileMeta}>
-                  Avatar URL: {profileData.avatar_url}
-                </Text>
-              ) : null}
-            </>
           ) : (
-            <Text style={{ color: "#ccc" }}>No profile data.</Text>
+            <>
+              <Text style={styles.profileEmail}>{profileViewingEmail}</Text>
+              {profileViewingEmail === userEmail && !profileEditMode && (
+                <TouchableOpacity
+                  style={{ marginTop: 6 }}
+                  onPress={enableEditMyProfile}
+                >
+                  <Text style={{ color: "#3a7afe", fontSize: 12 }}>
+                    Edit Profile
+                  </Text>
+                </TouchableOpacity>
+              )}
+              {profileViewingEmail === userEmail && profileEditMode ? (
+                <>
+                  <TextInput
+                    style={styles.broadcastInput}
+                    placeholder="Name"
+                    placeholderTextColor={PALETTE.textSecondary}
+                    value={profileForm.name}
+                    onChangeText={(v) =>
+                      setProfileForm((f) => ({ ...f, name: v }))
+                    }
+                  />
+                  <TextInput
+                    style={[styles.broadcastInput, { height: 80 }]}
+                    placeholder="About"
+                    placeholderTextColor={PALETTE.textSecondary}
+                    value={profileForm.about}
+                    multiline
+                    onChangeText={(v) =>
+                      setProfileForm((f) => ({ ...f, about: v }))
+                    }
+                  />
+                  <TextInput
+                    style={styles.broadcastInput}
+                    placeholder="Avatar URL"
+                    placeholderTextColor={PALETTE.textSecondary}
+                    autoCapitalize="none"
+                    value={profileForm.avatar_url}
+                    onChangeText={(v) =>
+                      setProfileForm((f) => ({ ...f, avatar_url: v }))
+                    }
+                  />
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      justifyContent: "flex-end",
+                      marginTop: 12,
+                    }}
+                  >
+                    <TouchableOpacity
+                      style={styles.bcBtnCancel}
+                      onPress={() => setProfileEditMode(false)}
+                    >
+                      <Text style={styles.bcBtnCancelTxt}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.bcBtnSend}
+                      onPress={saveMyProfile}
+                    >
+                      <Text style={styles.bcBtnSendTxt}>Save</Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              ) : (
+                <>
+                  {profileData?.name && (
+                    <Text style={styles.profileName}>{profileData.name}</Text>
+                  )}
+                  {profileData?.about && (
+                    <Text style={styles.profileAbout}>{profileData.about}</Text>
+                  )}
+                  {profileData?.avatar_url && (
+                    <Text style={styles.profileMeta}>
+                      Avatar URL: {profileData.avatar_url}
+                    </Text>
+                  )}
+                </>
+              )}
+            </>
           )}
           <TouchableOpacity
             onPress={() => setProfileModalVisible(false)}
@@ -565,14 +908,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   searchInputFull: {
+    // reduced height
     flex: 1,
     backgroundColor: "#233138",
     marginRight: 10,
     borderRadius: 8,
     paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingVertical: 4, // reduced
     color: "#e9edef",
     fontSize: 14,
+    minHeight: 36,
   },
   archivedRow: {
     flexDirection: "row",
@@ -592,9 +937,10 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   row: {
+    // adjust to prevent cramped look
     flexDirection: "row",
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 12, // slightly larger
     backgroundColor: PALETTE.row,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "#1f2c34",
@@ -606,7 +952,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#233138",
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 14,
+    marginRight: 12,
   },
   avatarTxt: { color: "#e9edef", fontWeight: "600", fontSize: 13 },
   rowTop: { flexDirection: "row", alignItems: "center" },
@@ -728,4 +1074,29 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   bcBtnSendTxt: { color: "#fff", fontWeight: "600" },
+  actionSheet: {
+    position: "absolute",
+    left: 20,
+    right: 20,
+    bottom: 30,
+    backgroundColor: "#162536",
+    borderRadius: 16,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "#26405a",
+  },
+  sheetTitle: {
+    color: "#e9edef",
+    fontWeight: "600",
+    fontSize: 13,
+    marginBottom: 4,
+    paddingHorizontal: 4,
+  },
+  sheetBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 6,
+  },
+  sheetBtnTxt: { color: "#e9edef", fontSize: 13, fontWeight: "500" },
 });
