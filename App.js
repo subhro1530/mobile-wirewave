@@ -42,6 +42,8 @@ function MainTabs() {
         tabBarStyle: {
           backgroundColor: "#0d1220",
           borderTopColor: "#1d2740",
+          paddingBottom: 6, // added
+          height: 64, // slight increase
         },
         tabBarActiveTintColor: BRAND_PRIMARY,
         tabBarInactiveTintColor: "#7c8aa8",
@@ -95,4 +97,3 @@ export default function App() {
     </AuthProvider>
   );
 }
-

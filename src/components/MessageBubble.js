@@ -55,9 +55,6 @@ export default function MessageBubble({
             )}
           </View>
         </View>
-        <View
-          style={[styles.tail, isMine ? styles.tailMine : styles.tailOther]}
-        />
       </View>
     </View>
   );
@@ -83,19 +80,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderRadius: 16,
   },
-  bubbleMine: { backgroundColor: COLORS.mine, borderTopRightRadius: 4 },
-  bubbleOther: { backgroundColor: COLORS.other, borderTopLeftRadius: 4 },
-  tail: {
-    position: "absolute",
-    width: 12,
-    height: 12,
-    bottom: 0,
-    transform: [{ rotate: "45deg" }],
+  bubbleMine: { backgroundColor: COLORS.mine, borderTopRightRadius: 8 }, // soften
+  bubbleOther: { backgroundColor: COLORS.other, borderTopLeftRadius: 8 },
+  text: { color: COLORS.text, fontSize: 14, lineHeight: 18 },
+  time: {
+    fontSize: 10,
+    color: COLORS.time,
+    textAlign: "right",
+    marginTop: 4,
+    opacity: 0.75,
   },
-  tailMine: {
-    right: -4,
-    backgroundColor: COLORS.mine,
-    borderBottomLeftRadius: 2,
+  metaRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    alignItems: "center",
+    marginTop: 2,
   },
   tailOther: {
     left: -4,

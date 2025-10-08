@@ -28,13 +28,12 @@ import Icon from "react-native-vector-icons/MaterialIcons";
 import ChatWindow from "../components/ChatWindow";
 
 const COLORS = {
-  bar: "#14233a", // changed from green
+  bar: "#14233a",
   bg: "#0b141a",
   bgInput: "#1f2c34",
-  accent: "#25D366",
+  send: "#3a7afe",
   textPrimary: "#e9edef",
   textSecondary: "#8696a0",
-  bubbleMine: "#005c4b",
 };
 
 export default function ChatWindowScreen() {
@@ -52,7 +51,10 @@ export default function ChatWindowScreen() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileData, setProfileData] = useState(null);
   const [profileError, setProfileError] = useState(null);
-  const [avatarUrl, setAvatarUrl] = useState(null); // NEW
+  const [avatarUrl, setAvatarUrl] = useState(null);
+  const [showEmoji, setShowEmoji] = useState(false);
+  const [shareVisible, setShareVisible] = useState(false);
+
   const chatRef = useRef(null);
 
   const loadMessages = useCallback(async () => {
@@ -159,7 +161,7 @@ export default function ChatWindowScreen() {
     ]);
   }, [contact, navigation]);
 
-  // Fetch profile early for avatar (silent)
+  // Fetch avatar
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -175,13 +177,29 @@ export default function ChatWindowScreen() {
     };
   }, [contact]);
 
+  const quickEmojis = ["😀", "😉", "🔥", "👍", "❤️", "😂", "🚀", "🙏"];
+  const insertEmoji = (e) => {
+    setText((t) => t + e);
+    setTimeout(() => chatRef.current?.scrollToBottom?.(), 40);
+  };
+
   return (
     <View style={styles.root}>
+      {/* Outside overlay for dropdown */}
+      {menuOpen && (
+        <Pressable
+          onPress={() => setMenuOpen(false)}
+          style={styles.overlay}
+        >
+          <View />
+        </Pressable>
+      )}
       <StatusBar
         translucent
         backgroundColor="transparent"
         barStyle="light-content"
       />
+
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
@@ -223,6 +241,7 @@ export default function ChatWindowScreen() {
           <Icon name="more-vert" size={22} color="#fff" />
         </TouchableOpacity>
       </View>
+
       {menuOpen && (
         <View style={styles.dropdown}>
           <TouchableOpacity
@@ -257,7 +276,6 @@ export default function ChatWindowScreen() {
               Delete Chat
             </Text>
           </TouchableOpacity>
-          {/* Removed explicit "Close" option (tap menu icon again to close) */}
         </View>
       )}
 
@@ -273,7 +291,7 @@ export default function ChatWindowScreen() {
           currentUserEmail={userEmail}
           onRefresh={loadMessages}
           onClear={() => {}}
-          bottomInset={70}
+          bottomInset={showEmoji ? 170 : 70}
         />
 
         {/* Composer */}
@@ -284,8 +302,11 @@ export default function ChatWindowScreen() {
           ]}
         >
           <View style={styles.inputRow}>
-            <TouchableOpacity style={styles.plusBtn}>
-              <Icon name="emoji-emotions" size={22} color="#8696a0" />
+            <TouchableOpacity
+              style={styles.iconSmall}
+              onPress={() => setShowEmoji((v) => !v)}
+            >
+              <Text style={{ fontSize: 20 }}>😊</Text>
             </TouchableOpacity>
             <TextInput
               style={styles.input}
@@ -296,11 +317,11 @@ export default function ChatWindowScreen() {
               multiline
               selectionColor="#3a7afe"
             />
-            <TouchableOpacity style={styles.attachBtn}>
+            <TouchableOpacity
+              style={styles.iconSmall}
+              onPress={() => setShareVisible(true)}
+            >
               <Icon name="attach-file" size={22} color="#8696a0" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.attachBtn}>
-              <Icon name="camera-alt" size={22} color="#8696a0" />
             </TouchableOpacity>
           </View>
           <TouchableOpacity
@@ -311,12 +332,27 @@ export default function ChatWindowScreen() {
             {loadingSend ? (
               <ActivityIndicator color="#fff" size="small" />
             ) : (
-              <Icon name="send" size={20} color="#fff" />
+              <Icon name="send" size={18} color="#fff" />
             )}
           </TouchableOpacity>
         </View>
+
+        {showEmoji && (
+          <View style={styles.emojiBar}>
+            {quickEmojis.map((em) => (
+              <TouchableOpacity
+                key={em}
+                onPress={() => insertEmoji(em)}
+                style={styles.emojiBtn}
+              >
+                <Text style={styles.emojiTxt}>{em}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
       </KeyboardAvoidingView>
 
+      {/* Profile Modal */}
       <Modal
         transparent
         visible={profileVisible}
@@ -336,18 +372,20 @@ export default function ChatWindowScreen() {
             <Text style={{ color: "#f55" }}>{profileError}</Text>
           ) : profileData ? (
             <>
-              <Text style={styles.profileTitle}>{contact}</Text>
-              {profileData.name && (
-                <Text style={styles.profileName}>{profileData.name}</Text>
-              )}
-              {profileData.about && (
-                <Text style={styles.profileAbout}>{profileData.about}</Text>
-              )}
-              {profileData.avatar_url && (
-                <Text style={styles.profileMeta}>
-                  Avatar: {profileData.avatar_url}
-                </Text>
-              )}
+              <Text style={styles.heading}>Name</Text>
+              <Text style={styles.profileNameValue}>
+                {profileData.name || "—"}
+              </Text>
+              <Text style={styles.heading}>About</Text>
+              <Text style={styles.profileAbout}>
+                {profileData.about || "—"}
+              </Text>
+              <Text style={styles.heading}>Email</Text>
+              <Text style={styles.profileMetaLine}>{contact}</Text>
+              <Text style={styles.heading}>Avatar URL</Text>
+              <Text style={styles.profileMetaLine}>
+                {profileData.avatar_url || "—"}
+              </Text>
             </>
           ) : (
             <Text style={{ color: "#ccc" }}>No profile data.</Text>
@@ -360,19 +398,81 @@ export default function ChatWindowScreen() {
           </TouchableOpacity>
         </View>
       </Modal>
+
+      {/* Share Sheet */}
+      <Modal
+        transparent
+        visible={shareVisible}
+        animationType="fade"
+        onRequestClose={() => setShareVisible(false)}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setShareVisible(false)}
+        >
+          <View />
+        </Pressable>
+        <View style={styles.shareSheet}>
+          <Text style={styles.shareTitle}>Share</Text>
+          <View style={styles.shareGrid}>
+            <ShareItem
+              label="Media"
+              color="#5c6ef8"
+              icon="image"
+              onPress={() => Alert.alert("Media", "Not implemented")}
+            />
+            <ShareItem
+              label="Documents"
+              color="#8e61d6"
+              icon="description"
+              onPress={() => Alert.alert("Documents", "Not implemented")}
+            />
+            <ShareItem
+              label="Location"
+              color="#17a884"
+              icon="place"
+              onPress={() => Alert.alert("Location", "Not implemented")}
+            />
+            <ShareItem
+              label="Contact"
+              color="#e08922"
+              icon="person"
+              onPress={() => Alert.alert("Contact", "Not implemented")}
+            />
+            <ShareItem
+              label="Close"
+              color="#444f5d"
+              icon="close"
+              onPress={() => setShareVisible(false)}
+            />
+          </View>
+        </View>
+      </Modal>
     </View>
+  );
+}
+
+function ShareItem({ label, color, icon, onPress }) {
+  return (
+    <TouchableOpacity style={styles.shareItem} onPress={onPress}>
+      <View style={[styles.shareIcon, { backgroundColor: color }]}>
+        <Icon name={icon} size={22} color="#fff" />
+      </View>
+      <Text style={styles.shareLabel}>{label}</Text>
+    </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: COLORS.bg },
+  overlay: { ...StyleSheet.absoluteFillObject, zIndex: 5 },
   header: {
     flexDirection: "row",
     alignItems: "flex-end",
     paddingTop: (StatusBar.currentHeight || 0) + 4,
     paddingBottom: 8,
     paddingHorizontal: 4,
-    backgroundColor: COLORS.bar, // updated
+    backgroundColor: COLORS.bar,
   },
   iconBtn: {
     width: 40,
@@ -388,6 +488,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginRight: 8,
+    overflow: "hidden",
   },
   headerAvatarTxt: { color: COLORS.textPrimary, fontWeight: "600" },
   contactName: {
@@ -401,30 +502,24 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
     paddingHorizontal: 6,
     paddingVertical: 6,
-    backgroundColor: "#0b141a",
+    backgroundColor: COLORS.bg,
   },
   inputRow: {
     flex: 1,
     flexDirection: "row",
     backgroundColor: COLORS.bgInput,
     borderRadius: 26,
-    paddingHorizontal: 4,
-    paddingVertical: 4,
-    alignItems: "flex-end",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    alignItems: "center",
   },
-  plusBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+  iconSmall: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
-  },
-  attachBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: "center",
-    justifyContent: "center",
+    marginRight: 4,
   },
   input: {
     flex: 1,
@@ -435,13 +530,14 @@ const styles = StyleSheet.create({
     maxHeight: 120,
   },
   sendBtn: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: COLORS.accent,
-    marginLeft: 6,
+    height: 48,
+    minWidth: 54,
+    paddingHorizontal: 16,
+    borderRadius: 24,
+    backgroundColor: COLORS.send,
     alignItems: "center",
     justifyContent: "center",
+    marginLeft: 6,
   },
   dropdown: {
     position: "absolute",
@@ -453,8 +549,8 @@ const styles = StyleSheet.create({
     minWidth: 160,
     borderWidth: 1,
     borderColor: "#1e3547",
+    zIndex: 10,
   },
-  dropdownItem: { paddingHorizontal: 14, paddingVertical: 10 },
   dropdownItemRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -462,6 +558,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   ddIcon: { marginRight: 8 },
+  dropdownTxt: { color: "#fff", fontSize: 13 },
   modalBackdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0,0,0,0.55)",
@@ -477,18 +574,82 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#28435b",
   },
-  profileTitle: { color: "#fff", fontSize: 16, fontWeight: "600" },
-  profileName: {
-    color: "#3a7afe",
-    marginTop: 6,
+  heading: {
+    marginTop: 10,
+    color: "#6f8294",
+    fontSize: 11,
+    fontWeight: "600",
+    letterSpacing: 0.5,
+  },
+  profileNameValue: {
+    color: "#fff",
     fontSize: 15,
     fontWeight: "600",
+    marginTop: 2,
   },
   profileAbout: {
-    color: "#9db2c9",
-    marginTop: 6,
-    fontSize: 13,
+    color: "#c8d3dc",
+    fontSize: 12,
     lineHeight: 18,
+    marginTop: 2,
   },
-  profileMeta: { color: "#657b92", marginTop: 8, fontSize: 11 },
+  profileMetaLine: {
+    color: "#b9c5d1",
+    fontSize: 12,
+    marginTop: 2,
+  },
+  emojiBar: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    backgroundColor: "#192530",
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderTopWidth: 1,
+    borderColor: "#223241",
+  },
+  emojiBtn: {
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    borderRadius: 6,
+    margin: 2,
+  },
+  emojiTxt: { fontSize: 22 },
+  shareSheet: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "#142332",
+    paddingTop: 18,
+    paddingBottom: 28,
+    paddingHorizontal: 18,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderWidth: 1,
+    borderColor: "#21384c",
+  },
+  shareTitle: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "600",
+    marginBottom: 12,
+  },
+  shareGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+  },
+  shareItem: {
+    width: "25%",
+    alignItems: "center",
+    marginBottom: 18,
+  },
+  shareIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 6,
+  },
+  shareLabel: { color: "#e9edef", fontSize: 11, textAlign: "center" },
 });

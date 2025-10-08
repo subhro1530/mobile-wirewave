@@ -147,7 +147,7 @@ export default function CommunitiesScreen() {
         </Text>
       </View>
 
-      {/* Broadcast Modal (previous full-screen UI) */}
+      {/* Broadcast Modal */}
       <Modal
         transparent
         visible={broadcastVisible}
@@ -178,11 +178,12 @@ export default function CommunitiesScreen() {
               style={{ marginHorizontal: 10 }}
             />
             <TextInput
-              style={styles.searchInput}
+              style={[styles.searchInput, { color: C.text }]} // ensure white
               placeholder="Search people"
               placeholderTextColor="#6d7d92"
               value={search}
               onChangeText={setSearch}
+              selectionColor="#3a7afe" // added
             />
             {search.length > 0 && (
               <TouchableOpacity
@@ -256,6 +257,7 @@ export default function CommunitiesScreen() {
               placeholderTextColor="#5f6d7c"
               value={content}
               onChangeText={setContent}
+              selectionColor="#3a7afe" // added
             />
             <TouchableOpacity
               style={[

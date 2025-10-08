@@ -26,7 +26,6 @@ import { useNavigation } from "@react-navigation/native";
 import { TextInput } from "react-native-paper";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-
 // Replace STYLE palette + UI layout
 const PALETTE = {
   brandBar: "#14233a", // deep bg matching icon shadow
@@ -68,6 +67,8 @@ export default function ChatScreen() {
     about: "",
     avatar_url: "",
   }); // form
+  const [contactAvatars, setContactAvatars] = useState({}); // email -> avatar_url|null
+  const [myAvatar, setMyAvatar] = useState(null); // current user avatar
   const navigation = useNavigation();
   const debounceRef = useRef(null); // NEW debounce timer
 
@@ -214,7 +215,7 @@ export default function ChatScreen() {
 
   // Unified profile open
   const openProfile = useCallback(
-    async (email, allowEdit = false) => {
+    async (email) => {
       setProfileViewingEmail(email);
       setProfileModalVisible(true);
       setProfileLoading(true);
@@ -223,7 +224,6 @@ export default function ChatScreen() {
       setProfileEditMode(false);
       try {
         if (email === userEmail) {
-          // current user profile
           const { data } = await API.get("/profile");
           setProfileData(data);
           setProfileForm({
@@ -231,7 +231,6 @@ export default function ChatScreen() {
             about: data?.about || "",
             avatar_url: data?.avatar_url || "",
           });
-          if (allowEdit) setProfileEditMode(true);
         } else {
           const { data } = await API.get(
             `/users/search?email=${encodeURIComponent(email)}`
@@ -334,8 +333,60 @@ export default function ChatScreen() {
     setChatActionVisible(true);
   };
 
+  // Fetch my avatar once
+  useEffect(() => {
+    if (!userEmail) return;
+    (async () => {
+      try {
+        const { data } = await API.get("/profile");
+        if (data?.avatar_url) setMyAvatar(data.avatar_url);
+      } catch {}
+    })();
+  }, [userEmail]);
+
+  // Fetch avatars for contacts (simple incremental)
+  useEffect(() => {
+    const toFetch = contacts
+      .map((c) => c.email)
+      .filter((e) => contactAvatars[e] === undefined);
+    if (!toFetch.length) return;
+    let cancelled = false;
+    (async () => {
+      for (const email of toFetch) {
+        try {
+          const { data } = await API.get(
+            `/users/search?email=${encodeURIComponent(email)}`
+          );
+          if (!cancelled) {
+            setContactAvatars((prev) => ({
+              ...prev,
+              [email]: data?.avatar_url || null,
+            }));
+          }
+        } catch {
+          if (!cancelled) {
+            setContactAvatars((prev) => ({ ...prev, [email]: null }));
+          }
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [contacts, contactAvatars]);
+
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: PALETTE.bg }]}>
+      {/* Outside tap to close dropdown */}
+      {showMenu && (
+        <Pressable
+          onPress={() => setShowMenu(false)}
+          style={styles.fullscreenOverlay}
+        >
+          <View />
+        </Pressable>
+      )}
+      {/* Action sheet overlay already handled by its own modal */}
       <StatusBar
         translucent
         backgroundColor="transparent"
@@ -357,12 +408,19 @@ export default function ChatScreen() {
             <Icon name="search" size={22} color={PALETTE.textPrimary} />
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.avatarMini, { marginLeft: 4 }]}
+            style={[styles.avatarMini, { marginLeft: 4, overflow: "hidden" }]}
             onPress={() => setShowMenu((v) => !v)}
           >
-            <Text style={styles.avatarMiniTxt}>
-              {userEmail?.[0]?.toUpperCase() || "U"}
-            </Text>
+            {myAvatar ? (
+              <Image
+                source={{ uri: myAvatar }}
+                style={{ width: "100%", height: "100%" }}
+              />
+            ) : (
+              <Text style={styles.avatarMiniTxt}>
+                {userEmail?.[0]?.toUpperCase() || "U"}
+              </Text>
+            )}
           </TouchableOpacity>
         </View>
       ) : (
@@ -412,14 +470,14 @@ export default function ChatScreen() {
         </View>
       )}
 
-      {/* Dropdown Menu with Icons */}
+      {/* Dropdown Menu with Icons (removed Edit My Profile) */}
       {showMenu && !showSearch && (
         <View style={styles.menu}>
           <TouchableOpacity
             style={styles.menuItem}
             onPress={() => {
               setShowMenu(false);
-              openProfile(userEmail, false);
+              openProfile(userEmail);
             }}
           >
             <Icon
@@ -429,21 +487,6 @@ export default function ChatScreen() {
               style={styles.menuIcon}
             />
             <Text style={styles.menuTxt}>My Profile</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => {
-              setShowMenu(false);
-              openProfile(userEmail, true);
-            }}
-          >
-            <Icon
-              name="edit"
-              size={16}
-              color="#3a7afe"
-              style={styles.menuIcon}
-            />
-            <Text style={styles.menuTxt}>Edit My Profile</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.menuItem}
@@ -543,15 +586,23 @@ export default function ChatScreen() {
               !m.read
           ).length;
           const starred = starredChats.has(item.email);
+          const avatar = contactAvatars[item.email];
           return (
             <View style={styles.row}>
               <TouchableOpacity
-                style={styles.avatar}
-                onPress={() => openProfile(item.email, false)}
+                style={[styles.avatar, { overflow: "hidden" }]}
+                onPress={() => openProfile(item.email)}
               >
-                <Text style={styles.avatarTxt}>
-                  {item.email.slice(0, 2).toUpperCase()}
-                </Text>
+                {avatar ? (
+                  <Image
+                    source={{ uri: avatar }}
+                    style={{ width: "100%", height: "100%" }}
+                  />
+                ) : (
+                  <Text style={styles.avatarTxt}>
+                    {item.email.slice(0, 2).toUpperCase()}
+                  </Text>
+                )}
               </TouchableOpacity>
               <TouchableOpacity
                 style={{ flex: 1 }}
@@ -719,7 +770,7 @@ export default function ChatScreen() {
         </View>
       </Modal>
 
-      {/* Profile Modal updated for edit */}
+      {/* Profile Modal redesigned */}
       <Modal
         transparent
         visible={profileModalVisible}
@@ -734,89 +785,126 @@ export default function ChatScreen() {
         >
           <View />
         </Pressable>
-        <View style={styles.modalCard}>
+        <View style={[styles.modalCard, { paddingTop: 22 }]}>
           {profileLoading ? (
             <ActivityIndicator color="#3a7afe" />
           ) : profileError ? (
             <Text style={{ color: "#f55" }}>{profileError}</Text>
           ) : (
             <>
+              <View style={styles.profileHeaderRow}>
+                <View style={styles.profileAvatarWrap}>
+                  {profileViewingEmail === userEmail &&
+                  profileEditMode ? null : profileData?.avatar_url ? (
+                    <Image
+                      source={{ uri: profileData.avatar_url }}
+                      style={styles.profileAvatarLarge}
+                    />
+                  ) : profileViewingEmail === userEmail &&
+                    profileForm.avatar_url &&
+                    !profileEditMode ? (
+                    <Image
+                      source={{ uri: profileForm.avatar_url }}
+                      style={styles.profileAvatarLarge}
+                    />
+                  ) : (
+                    <View style={styles.profileAvatarFallback}>
+                      <Text style={styles.profileAvatarFallbackTxt}>
+                        {profileViewingEmail?.[0]?.toUpperCase() || "U"}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                {profileViewingEmail === userEmail && (
+                  <TouchableOpacity
+                    style={styles.inlineEditBtn}
+                    onPress={() => setProfileEditMode((m) => !m)}
+                  >
+                    <Icon
+                      name={profileEditMode ? "close" : "edit"}
+                      size={18}
+                      color="#fff"
+                    />
+                  </TouchableOpacity>
+                )}
+              </View>
+
               <Text style={styles.profileEmail}>{profileViewingEmail}</Text>
-              {profileViewingEmail === userEmail && !profileEditMode && (
-                <TouchableOpacity
-                  style={{ marginTop: 6 }}
-                  onPress={enableEditMyProfile}
-                >
-                  <Text style={{ color: "#3a7afe", fontSize: 12 }}>
-                    Edit Profile
-                  </Text>
-                </TouchableOpacity>
-              )}
+
               {profileViewingEmail === userEmail && profileEditMode ? (
                 <>
+                  {/* editable inputs keep white text */}
                   <TextInput
-                    style={styles.broadcastInput}
+                    style={styles.editInput}
                     placeholder="Name"
-                    placeholderTextColor={PALETTE.textSecondary}
+                    placeholderTextColor="#77818c"
                     value={profileForm.name}
                     onChangeText={(v) =>
                       setProfileForm((f) => ({ ...f, name: v }))
                     }
                   />
                   <TextInput
-                    style={[styles.broadcastInput, { height: 80 }]}
+                    style={[styles.editInput, { height: 80 }]}
                     placeholder="About"
-                    placeholderTextColor={PALETTE.textSecondary}
-                    value={profileForm.about}
+                    placeholderTextColor="#77818c"
                     multiline
+                    value={profileForm.about}
                     onChangeText={(v) =>
                       setProfileForm((f) => ({ ...f, about: v }))
                     }
                   />
                   <TextInput
-                    style={styles.broadcastInput}
+                    style={styles.editInput}
                     placeholder="Avatar URL"
-                    placeholderTextColor={PALETTE.textSecondary}
+                    placeholderTextColor="#77818c"
                     autoCapitalize="none"
                     value={profileForm.avatar_url}
                     onChangeText={(v) =>
                       setProfileForm((f) => ({ ...f, avatar_url: v }))
                     }
                   />
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      justifyContent: "flex-end",
-                      marginTop: 12,
-                    }}
-                  >
+                  <View style={styles.editActions}>
                     <TouchableOpacity
-                      style={styles.bcBtnCancel}
-                      onPress={() => setProfileEditMode(false)}
+                      style={styles.cancelBtn}
+                      onPress={() => {
+                        setProfileEditMode(false);
+                        if (profileData) {
+                          setProfileForm({
+                            name: profileData.name || "",
+                            about: profileData.about || "",
+                            avatar_url: profileData.avatar_url || "",
+                          });
+                        }
+                      }}
                     >
-                      <Text style={styles.bcBtnCancelTxt}>Cancel</Text>
+                      <Text style={styles.cancelTxt}>Cancel</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={styles.bcBtnSend}
+                      style={styles.saveBtn}
                       onPress={saveMyProfile}
                     >
-                      <Text style={styles.bcBtnSendTxt}>Save</Text>
+                      <Text style={styles.saveTxt}>Save</Text>
                     </TouchableOpacity>
                   </View>
                 </>
               ) : (
                 <>
-                  {profileData?.name && (
-                    <Text style={styles.profileName}>{profileData.name}</Text>
-                  )}
-                  {profileData?.about && (
-                    <Text style={styles.profileAbout}>{profileData.about}</Text>
-                  )}
-                  {profileData?.avatar_url && (
-                    <Text style={styles.profileMeta}>
-                      Avatar URL: {profileData.avatar_url}
-                    </Text>
-                  )}
+                  <Text style={styles.heading}>Name</Text>
+                  <Text style={styles.profileNameValue}>
+                    {profileData?.name || "—"}
+                  </Text>
+                  <Text style={styles.heading}>About</Text>
+                  <Text style={styles.profileAbout}>
+                    {profileData?.about || "—"}
+                  </Text>
+                  <Text style={styles.heading}>Email</Text>
+                  <Text style={styles.profileMetaLine}>
+                    {profileViewingEmail}
+                  </Text>
+                  <Text style={styles.heading}>Avatar URL</Text>
+                  <Text style={styles.profileMetaLine}>
+                    {profileData?.avatar_url || "—"}
+                  </Text>
                 </>
               )}
             </>
@@ -824,7 +912,7 @@ export default function ChatScreen() {
         </View>
       </Modal>
 
-      {/* New Chat Modal (improved colors & auto-validation info) */}
+      {/* New Chat Modal input already white text & outside tap implemented */}
       <Modal
         transparent
         visible={newChatVisible}
@@ -1011,6 +1099,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginRight: 12,
+    overflow: "hidden",
   },
   avatarTxt: { color: "#e9edef", fontWeight: "600", fontSize: 13 },
   rowTop: { flexDirection: "row", alignItems: "center" },
@@ -1158,4 +1247,92 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
   },
   sheetBtnTxt: { color: "#e9edef", fontSize: 13, fontWeight: "500" },
+  fullscreenOverlay: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  profileHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  profileAvatarWrap: { width: 72, height: 72 },
+  profileAvatarLarge: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "#1e2d3a",
+  },
+  profileAvatarFallback: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "#25384a",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  profileAvatarFallbackTxt: {
+    color: "#e9edef",
+    fontSize: 24,
+    fontWeight: "700",
+  },
+  inlineEditBtn: {
+    marginLeft: 16,
+    backgroundColor: "#2c4052",
+    padding: 8,
+    borderRadius: 18,
+  },
+  editInput: {
+    backgroundColor: "#202f3d",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: "#e9edef",
+    fontSize: 13,
+    borderWidth: 1,
+    borderColor: "#2e465a",
+    marginTop: 10,
+  },
+  editActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    marginTop: 14,
+  },
+  cancelBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: "#273642",
+    marginRight: 8,
+  },
+  cancelTxt: { color: "#9aa8b3", fontSize: 13, fontWeight: "500" },
+  saveBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: "#3a7afe",
+  },
+  saveTxt: { color: "#fff", fontSize: 13, fontWeight: "600" },
+  heading: {
+    marginTop: 10,
+    color: "#6f8294",
+    fontSize: 11,
+    fontWeight: "600",
+    letterSpacing: 0.5,
+  },
+  profileNameValue: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  profileMetaLine: {
+    color: "#b9c5d1",
+    fontSize: 12,
+    marginTop: 2,
+  },
+  // ensure search input text white
+  searchSlimInput: {
+    // ...existing properties...
+    color: "#e9edef",
+  },
 });
