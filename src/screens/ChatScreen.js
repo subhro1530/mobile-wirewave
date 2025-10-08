@@ -24,6 +24,18 @@ import Icon from "react-native-vector-icons/MaterialIcons";
 import { useNavigation } from "@react-navigation/native";
 import { TextInput } from "react-native-paper";
 
+// Replace STYLE palette + UI layout
+const PALETTE = {
+  brandBar: "#008069",
+  brandAccent: "#25D366",
+  bg: "#0b141a",
+  bgList: "#111b21",
+  row: "#111b21",
+  rowBorder: "#1f2c34",
+  textPrimary: "#e9edef",
+  textSecondary: "#8696a0",
+};
+
 export default function ChatScreen() {
   const { userEmail, logout } = useContext(AuthContext);
   const [messages, setMessages] = useState([]);
@@ -35,6 +47,7 @@ export default function ChatScreen() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileData, setProfileData] = useState(null);
   const [profileError, setProfileError] = useState(null);
+  const [showSearch, setShowSearch] = useState(false); // new
   const navigation = useNavigation();
 
   // Load messages
@@ -103,37 +116,58 @@ export default function ChatScreen() {
   }, []);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: PALETTE.bg }]}>
       <StatusBar
         translucent
         backgroundColor="transparent"
         barStyle="light-content"
       />
-      {/* Top bar */}
-      <View style={styles.topBar}>
-        <Image
-          source={require("../../assets/logo.png")}
-          style={styles.logo}
-          resizeMode="contain"
-        />
-        <View style={{ flex: 1 }} />
-        <TouchableOpacity
-          style={styles.iconBtn}
-          onPress={() => {
-            /* implement search UI if needed */
-          }}
-        >
-          <Icon name="search" size={22} color="#fff" />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.iconBtn}
-          onPress={() => setShowMenu((v) => !v)}
-        >
-          <Icon name="more-vert" size={22} color="#fff" />
-        </TouchableOpacity>
-      </View>
-      {/* Menu */}
-      {showMenu && (
+      {/* Top Bar */}
+      {!showSearch ? (
+        <View style={styles.topBar}>
+          <Text style={styles.appTitle}>WireWave</Text>
+          <TouchableOpacity style={styles.topIcon}>
+            <Icon name="photo-camera" size={20} color={PALETTE.textPrimary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.topIcon}
+            onPress={() => setShowSearch(true)}
+          >
+            <Icon name="search" size={22} color={PALETTE.textPrimary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.avatarMini, { marginLeft: 4 }]}
+            onPress={() => setShowMenu((v) => !v)}
+          >
+            <Text style={styles.avatarMiniTxt}>
+              {userEmail?.[0]?.toUpperCase() || "U"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <View style={styles.searchBarRow}>
+          <TouchableOpacity
+            style={styles.topIcon}
+            onPress={() => {
+              setShowSearch(false);
+              setSearchQuery("");
+            }}
+          >
+            <Icon name="arrow-back" size={22} color={PALETTE.textPrimary} />
+          </TouchableOpacity>
+          <TextInput
+            style={styles.searchInputFull}
+            placeholder="Search..."
+            placeholderTextColor={PALETTE.textSecondary}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoFocus
+          />
+        </View>
+      )}
+
+      {/* Overflow Menu */}
+      {showMenu && !showSearch && (
         <View style={styles.menu}>
           <TouchableOpacity
             style={styles.menuItem}
@@ -142,7 +176,7 @@ export default function ChatScreen() {
               openProfileModal();
             }}
           >
-            <Text style={styles.menuItemTxt}>My Profile</Text>
+            <Text style={styles.menuTxt}>My Profile</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.menuItem}
@@ -151,27 +185,36 @@ export default function ChatScreen() {
               logout?.();
             }}
           >
-            <Text style={[styles.menuItemTxt, { color: "#ff6666" }]}>
-              Logout
-            </Text>
+            <Text style={[styles.menuTxt, { color: "#ff6b6b" }]}>Logout</Text>
           </TouchableOpacity>
         </View>
       )}
-      {/* Search bar */}
-      <View style={styles.searchWrap}>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search conversations..."
-          placeholderTextColor="#666"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
-      </View>
-      {/* Chat list */}
+
+      {/* Chats List */}
       <FlatList
         data={filtered}
         keyExtractor={(item) => item.email}
-        contentContainerStyle={{ paddingBottom: 80 }}
+        contentContainerStyle={{ paddingBottom: 100 }}
+        ListHeaderComponent={
+          <View>
+            {/* Archived stub */}
+            <TouchableOpacity style={styles.archivedRow}>
+              <Icon
+                name="archive"
+                size={22}
+                color={PALETTE.textSecondary}
+                style={{ marginRight: 16 }}
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.archivedText}>Archived</Text>
+                <Text style={styles.archivedSub}>0 chats</Text>
+              </View>
+            </TouchableOpacity>
+            <Text style={styles.hintTxt}>
+              Tap and hold a chat for more options
+            </Text>
+          </View>
+        }
         renderItem={({ item }) => {
           const unreadCount = messages.filter(
             (m) =>
@@ -185,6 +228,10 @@ export default function ChatScreen() {
               onPress={() =>
                 navigation.navigate("ChatWindow", { contact: item.email })
               }
+              onLongPress={() => {
+                // placeholder for future contextual menu
+              }}
+              delayLongPress={300}
             >
               <View style={styles.avatar}>
                 <Text style={styles.avatarTxt}>
@@ -192,49 +239,64 @@ export default function ChatScreen() {
                 </Text>
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.name}>{item.email}</Text>
-                <Text
-                  style={styles.preview}
-                  numberOfLines={1}
-                  ellipsizeMode="tail"
-                >
-                  {item.lastMessage || "No messages yet"}
-                </Text>
-              </View>
-              <View style={{ alignItems: "flex-end", minWidth: 34 }}>
-                <Text style={styles.time}>
-                  {item.lastMessageTime &&
-                    new Date(item.lastMessageTime).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                </Text>
-                {unreadCount > 0 && (
-                  <View style={styles.unreadBadge}>
-                    <Text style={styles.unreadBadgeTxt}>
-                      {unreadCount > 99 ? "99+" : unreadCount}
-                    </Text>
-                  </View>
-                )}
+                <View style={styles.rowTop}>
+                  <Text style={styles.name} numberOfLines={1}>
+                    {item.email}
+                  </Text>
+                  <Text style={styles.time}>
+                    {item.lastMessageTime &&
+                      new Date(item.lastMessageTime).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                  </Text>
+                </View>
+                <View style={styles.rowBottom}>
+                  <Text
+                    style={styles.preview}
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                  >
+                    {item.lastMessage || "No messages yet"}
+                  </Text>
+                  {unreadCount > 0 && (
+                    <View style={styles.unreadBadge}>
+                      <Text style={styles.unreadBadgeTxt}>
+                        {unreadCount > 99 ? "99+" : unreadCount}
+                      </Text>
+                    </View>
+                  )}
+                </View>
               </View>
             </TouchableOpacity>
           );
         }}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={{ color: "#555" }}>No conversations</Text>
+            <Text style={{ color: PALETTE.textSecondary }}>
+              No conversations
+            </Text>
           </View>
         }
       />
-      {/* Floating new chat button */}
+
+      {/* Encryption note */}
+      <View style={styles.encryptNoteWrap}>
+        <Text style={styles.encryptNote}>
+          Your personal messages are end‑to‑end encrypted
+        </Text>
+      </View>
+
+      {/* Floating Action Button */}
       <TouchableOpacity
         style={styles.fab}
         onPress={() => {
-          /* implement new chat UI if needed */
+          // placeholder new chat
         }}
       >
-        <Icon name="chat" size={28} color="#fff" />
+        <Icon name="chat" size={26} color="#fff" />
       </TouchableOpacity>
+
       {/* Profile Modal */}
       <Modal
         transparent
@@ -299,98 +361,154 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#101010",
-    paddingTop: StatusBar.currentHeight || 0,
-    paddingBottom: 0,
   },
   topBar: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    backgroundColor: "#181818",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#222",
+    paddingHorizontal: 14,
+    paddingTop: (StatusBar.currentHeight || 0) + 4,
+    paddingBottom: 10,
+    backgroundColor: PALETTE.brandBar,
   },
-  logo: { width: 38, height: 38, marginRight: 10 },
-  iconBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+  appTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#fff",
+    letterSpacing: 0.5,
+  },
+  topIcon: {
+    width: 40,
+    height: 40,
     alignItems: "center",
     justifyContent: "center",
-    marginLeft: 6,
   },
+  avatarMini: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#1f2c34",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarMiniTxt: { color: "#e9edef", fontWeight: "600" },
   menu: {
     position: "absolute",
-    top: 58,
-    right: 10,
-    backgroundColor: "#222",
-    borderRadius: 10,
-    paddingVertical: 6,
-    minWidth: 140,
-    zIndex: 40,
-    elevation: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#2a2a2a",
-  },
-  menuItem: { paddingVertical: 10, paddingHorizontal: 14 },
-  menuItemTxt: { color: "#eee", fontSize: 13 },
-  searchWrap: { paddingHorizontal: 12, marginTop: 8, marginBottom: 4 },
-  searchInput: {
-    backgroundColor: "#1f1f1f",
+    top: (StatusBar.currentHeight || 0) + 58,
+    right: 8,
+    backgroundColor: "#233138",
     borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: "#fff",
+    paddingVertical: 6,
+    minWidth: 170,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#2d3d44",
+    zIndex: 50,
+  },
+  menuItem: { paddingHorizontal: 16, paddingVertical: 10 },
+  menuTxt: { color: "#e9edef", fontSize: 13 },
+  searchBarRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#1f2c34",
+    paddingTop: (StatusBar.currentHeight || 0) + 4,
+    paddingBottom: 8,
+    paddingHorizontal: 4,
+  },
+  searchInputFull: {
+    flex: 1,
+    backgroundColor: "#233138",
+    marginRight: 10,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    color: "#e9edef",
     fontSize: 14,
+  },
+  archivedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#111b21",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#1f2c34",
+  },
+  archivedText: { color: "#e9edef", fontWeight: "600", fontSize: 14 },
+  archivedSub: { color: "#8696a0", fontSize: 11, marginTop: 2 },
+  hintTxt: {
+    color: "#8696a0",
+    fontSize: 11,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
   },
   row: {
     flexDirection: "row",
-    paddingHorizontal: 12,
-    paddingVertical: 14,
-    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: "#111b21",
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#222",
-    backgroundColor: "#181818",
+    borderBottomColor: "#1f2c34",
   },
   avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#3a7afe",
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#233138",
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 10,
+    marginRight: 14,
   },
-  avatarTxt: { color: "#fff", fontWeight: "600" },
-  name: { color: "#fff", fontSize: 14, marginBottom: 2 },
-  preview: { color: "#888", fontSize: 12, maxWidth: 160 },
-  time: { color: "#666", fontSize: 10, marginLeft: 6 },
+  avatarTxt: { color: "#e9edef", fontWeight: "600", fontSize: 13 },
+  rowTop: { flexDirection: "row", alignItems: "center" },
+  name: { flex: 1, color: "#e9edef", fontSize: 15, fontWeight: "600" },
+  time: { color: "#8696a0", fontSize: 11, marginLeft: 8 },
+  rowBottom: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 2,
+  },
+  preview: {
+    flex: 1,
+    color: "#8696a0",
+    fontSize: 12,
+  },
   unreadBadge: {
-    marginTop: 4,
+    marginLeft: 8,
     minWidth: 20,
     paddingHorizontal: 6,
     height: 20,
     borderRadius: 10,
-    backgroundColor: "#3a7afe",
+    backgroundColor: PALETTE.brandAccent,
     alignItems: "center",
     justifyContent: "center",
   },
-  unreadBadgeTxt: { color: "#fff", fontSize: 11, fontWeight: "600" },
-  empty: { padding: 32, alignItems: "center" },
+  unreadBadgeTxt: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  empty: { padding: 60, alignItems: "center" },
   fab: {
     position: "absolute",
-    right: 24,
-    bottom: 32,
-    backgroundColor: "#3a7afe",
+    right: 22,
+    bottom: 28,
     width: 56,
     height: 56,
     borderRadius: 28,
+    backgroundColor: PALETTE.brandAccent,
     alignItems: "center",
     justifyContent: "center",
     elevation: 8,
-    zIndex: 100,
+  },
+  encryptNoteWrap: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    bottom: 6,
+    alignItems: "center",
+  },
+  encryptNote: {
+    fontSize: 11,
+    color: "#8696a0",
   },
   modalBackdrop: {
     ...StyleSheet.absoluteFillObject,

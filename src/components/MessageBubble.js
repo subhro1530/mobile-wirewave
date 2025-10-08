@@ -3,6 +3,16 @@ import React from "react";
 import { View, Text, StyleSheet } from "react-native";
 import Icon from "react-native-vector-icons/MaterialIcons";
 
+const COLORS = {
+  mine: "#005c4b",
+  other: "#202c33",
+  text: "#e9edef",
+  time: "#8696a0",
+  readTick: "#53bdeb",
+  sentTick: "#8696a0",
+  selectedBorder: "#25D366",
+};
+
 export default function MessageBubble({
   message,
   currentUser,
@@ -32,7 +42,7 @@ export default function MessageBubble({
             <Icon
               name={read ? "done-all" : "check"}
               size={14}
-              color={read ? "#cfe2ff" : "#cfd8ff"}
+              color={read ? COLORS.readTick : COLORS.sentTick}
               style={{ marginLeft: 4, opacity: 0.85 }}
             />
           )}
@@ -43,31 +53,31 @@ export default function MessageBubble({
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: "row", marginBottom: 6 },
+  row: { flexDirection: "row", marginBottom: 6, paddingHorizontal: 4 },
   rowLeft: { justifyContent: "flex-start" },
   rowRight: { justifyContent: "flex-end" },
   bubble: {
     maxWidth: "78%",
     paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 18,
+    paddingVertical: 8,
+    borderRadius: 16,
   },
   bubbleMine: {
-    backgroundColor: "#3a7afe",
+    backgroundColor: COLORS.mine,
     borderTopRightRadius: 4,
   },
   bubbleOther: {
-    backgroundColor: "#2a2a2a",
+    backgroundColor: COLORS.other,
     borderTopLeftRadius: 4,
   },
   bubbleSelected: {
     borderWidth: 1,
-    borderColor: "#3a7afe",
+    borderColor: COLORS.selectedBorder,
   },
-  text: { color: "#fff", fontSize: 14, lineHeight: 18 },
+  text: { color: COLORS.text, fontSize: 14, lineHeight: 18 },
   time: {
     fontSize: 10,
-    color: "#cfd8ff",
+    color: COLORS.time,
     textAlign: "right",
     marginTop: 4,
     opacity: 0.75,
@@ -76,6 +86,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "flex-end",
     alignItems: "center",
-    marginTop: 4,
+    marginTop: 2,
   },
 });

@@ -33,30 +33,34 @@ const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
 
 function MainTabs() {
+  const BRAND_PRIMARY = "#008069";
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
-        tabBarStyle: { backgroundColor: "#181818", borderTopColor: "#222" },
-        tabBarActiveTintColor: "#3a7afe",
-        tabBarInactiveTintColor: "#aaa",
+        tabBarStyle: {
+          backgroundColor: "#111b21",
+          borderTopColor: "#1f2c34",
+        },
+        tabBarActiveTintColor: BRAND_PRIMARY,
+        tabBarInactiveTintColor: "#8696a0",
         tabBarIcon: ({ color, size }) => {
           if (route.name === "Chats")
             return <Icon name="chat" color={color} size={size} />;
-          if (route.name === "Communities")
-            return <Icon name="groups" color={color} size={size} />;
           if (route.name === "Updates")
             return <Icon name="update" color={color} size={size} />;
+          if (route.name === "Communities")
+            return <Icon name="groups" color={color} size={size} />;
           return null;
         },
       })}
     >
       <Tab.Screen name="Chats" component={ChatScreen} />
-      <Tab.Screen name="Communities">
-        {() => <ComingSoonScreen title="Communities" />}
-      </Tab.Screen>
       <Tab.Screen name="Updates">
         {() => <ComingSoonScreen title="Updates" />}
+      </Tab.Screen>
+      <Tab.Screen name="Communities">
+        {() => <ComingSoonScreen title="Communities" />}
       </Tab.Screen>
     </Tab.Navigator>
   );

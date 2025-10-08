@@ -16,6 +16,12 @@ import {
 } from "react-native";
 import MessageBubble from "./MessageBubble";
 
+const THEME = {
+  bg: "#0b141a",
+  dateBg: "#1f2c34",
+  dateText: "#8696a0",
+};
+
 function groupByDate(list) {
   const map = {};
   list.forEach((m) => {
@@ -106,15 +112,17 @@ export default forwardRef(function ChatWindow(
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: THEME.bg }]}>
       <FlatList
         ref={flatRef}
         data={grouped}
         keyExtractor={(g) => g.date}
         renderItem={({ item }) => (
           <View>
-            <View style={styles.dateWrap}>
-              <Text style={styles.dateTxt}>{item.date}</Text>
+            <View style={[styles.dateWrap, { backgroundColor: THEME.dateBg }]}>
+              <Text style={[styles.dateTxt, { color: THEME.dateText }]}>
+                {item.date}
+              </Text>
             </View>
             {item.items.map((m) => {
               const isSelected = selectedIds.has(m.id);
@@ -172,17 +180,16 @@ export default forwardRef(function ChatWindow(
 });
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#121212" },
-  list: { padding: 14, paddingBottom: 40 },
+  container: { flex: 1 },
+  list: { padding: 10, paddingBottom: 40 },
   dateWrap: {
     alignSelf: "center",
-    backgroundColor: "#1f1f1f",
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 14,
     marginVertical: 12,
   },
-  dateTxt: { color: "#bbb", fontSize: 11 },
+  dateTxt: { fontSize: 11 },
   placeholder: {
     flex: 1,
     alignItems: "center",
