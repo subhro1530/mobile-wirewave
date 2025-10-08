@@ -51,10 +51,10 @@ export default function ChatScreen() {
   const [profileData, setProfileData] = useState(null);
   const [profileError, setProfileError] = useState(null);
   const [showSearch, setShowSearch] = useState(false); // new
-  const [broadcastVisible, setBroadcastVisible] = useState(false); // new
-  const [broadcastRecipients, setBroadcastRecipients] = useState(""); // new
-  const [broadcastContent, setBroadcastContent] = useState(""); // new
-  const [sendingBroadcast, setSendingBroadcast] = useState(false); // new
+  const [newChatVisible, setNewChatVisible] = useState(false); // NEW
+  const [newChatEmail, setNewChatEmail] = useState(""); // NEW
+  const [newChatChecking, setNewChatChecking] = useState(false); // NEW
+  const [newChatExists, setNewChatExists] = useState(null); // true/false/null
   const [archivedChats, setArchivedChats] = useState(new Set()); // new
   const [showArchivedView, setShowArchivedView] = useState(false); // new
   const [starredChats, setStarredChats] = useState(new Set()); // new
@@ -96,33 +96,6 @@ export default function ChatScreen() {
       },
     ]);
   }, [logout]);
-
-  const sendBroadcast = useCallback(async () => {
-    const emails = broadcastRecipients
-      .split(/[,;\s]+/)
-      .map((e) => e.trim())
-      .filter((e) => e && e.includes("@") && e !== userEmail);
-    if (!emails.length || !broadcastContent.trim()) {
-      Alert.alert("Missing Data", "Provide recipients & content.");
-      return;
-    }
-    setSendingBroadcast(true);
-    try {
-      await API.post("/messages/multi", {
-        receiver_emails: emails,
-        content: broadcastContent.trim(),
-      });
-      setBroadcastContent("");
-      setBroadcastRecipients("");
-      setBroadcastVisible(false);
-      loadMessages();
-      Alert.alert("Sent", "Broadcast delivered.");
-    } catch (e) {
-      Alert.alert("Error", e.message);
-    } finally {
-      setSendingBroadcast(false);
-    }
-  }, [broadcastRecipients, broadcastContent, userEmail, loadMessages]);
 
   // Load messages
   const loadMessages = useCallback(async () => {
@@ -368,24 +341,38 @@ export default function ChatScreen() {
           </TouchableOpacity>
         </View>
       ) : (
-        <View style={styles.searchBarRow}>
-          <TouchableOpacity
-            style={styles.topIcon}
-            onPress={() => {
-              setShowSearch(false);
-              setSearchQuery("");
-            }}
-          >
-            <Icon name="arrow-back" size={22} color={PALETTE.textPrimary} />
-          </TouchableOpacity>
+        <View style={styles.searchBarFancy}>
+          <Icon
+            name="search"
+            size={18}
+            color="#6d7d92"
+            style={{ marginHorizontal: 10 }}
+          />
           <TextInput
-            style={styles.searchInputFull}
-            placeholder="Search..."
-            placeholderTextColor={PALETTE.textSecondary}
+            style={styles.searchFancyInput}
+            placeholder="Search chats"
+            placeholderTextColor="#6d7d92"
             value={searchQuery}
             onChangeText={setSearchQuery}
             autoFocus
           />
+          {!!searchQuery && (
+            <TouchableOpacity
+              onPress={() => setSearchQuery("")}
+              style={{ paddingHorizontal: 10, paddingVertical: 6 }}
+            >
+              <Icon name="close" size={18} color="#6d7d92" />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
+            onPress={() => {
+              setShowSearch(false);
+              setSearchQuery("");
+            }}
+            style={{ paddingHorizontal: 10, paddingVertical: 6 }}
+          >
+            <Icon name="arrow-forward" size={18} color="#6d7d92" />
+          </TouchableOpacity>
         </View>
       )}
 
@@ -409,15 +396,6 @@ export default function ChatScreen() {
             }}
           >
             <Text style={styles.menuTxt}>Edit My Profile</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => {
-              setShowMenu(false);
-              setBroadcastVisible(true);
-            }}
-          >
-            <Text style={styles.menuTxt}>Broadcast Message</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.menuItem}
@@ -579,7 +557,11 @@ export default function ChatScreen() {
       {/* Floating Action Button */}
       <TouchableOpacity
         style={[styles.fab, { backgroundColor: PALETTE.brandAccent }]}
-        onPress={() => setBroadcastVisible(true)}
+        onPress={() => {
+          setNewChatEmail("");
+          setNewChatExists(null);
+          setNewChatVisible(true);
+        }}
         onLongPress={() => setShowSearch(true)}
         delayLongPress={350}
       >
@@ -782,59 +764,89 @@ export default function ChatScreen() {
         </View>
       </Modal>
 
-      {/* Broadcast Modal */}
+      {/* New Chat Modal */}
       <Modal
         transparent
-        visible={broadcastVisible}
+        visible={newChatVisible}
         animationType="slide"
-        onRequestClose={() => !sendingBroadcast && setBroadcastVisible(false)}
+        onRequestClose={() => !newChatChecking && setNewChatVisible(false)}
       >
         <Pressable
           style={styles.modalBackdrop}
-          onPress={() => !sendingBroadcast && setBroadcastVisible(false)}
+          onPress={() => !newChatChecking && setNewChatVisible(false)}
         >
           <View />
         </Pressable>
-        <View style={[styles.modalCard, { top: "18%" }]}>
-          <Text style={styles.profileEmail}>Broadcast</Text>
+        <View style={[styles.modalCard, { top: "24%" }]}>
+          <Text style={styles.profileEmail}>Start New Chat</Text>
           <Text style={styles.profileMeta}>
-            Separate multiple emails with commas or spaces.
+            Enter an email to check availability.
           </Text>
           <TextInput
             style={styles.broadcastInput}
-            placeholder="Recipients (emails)"
-            placeholderTextColor={PALETTE.textSecondary}
-            value={broadcastRecipients}
-            onChangeText={setBroadcastRecipients}
+            placeholder="user@example.com"
             autoCapitalize="none"
-            multiline
-          />
-          <TextInput
-            style={[styles.broadcastInput, { height: 90 }]}
-            placeholder="Message content"
             placeholderTextColor={PALETTE.textSecondary}
-            value={broadcastContent}
-            onChangeText={setBroadcastContent}
-            multiline
+            value={newChatEmail}
+            onChangeText={(v) => {
+              setNewChatEmail(v);
+              setNewChatExists(null);
+            }}
+            onSubmitEditing={async () => {
+              if (!newChatEmail.includes("@")) return;
+              setNewChatChecking(true);
+              setNewChatExists(null);
+              try {
+                await API.get(
+                  `/users/search?email=${encodeURIComponent(
+                    newChatEmail.trim()
+                  )}`
+                );
+                setNewChatExists(true);
+              } catch {
+                setNewChatExists(false);
+              } finally {
+                setNewChatChecking(false);
+              }
+            }}
           />
+          <View style={{ minHeight: 26, justifyContent: "center" }}>
+            {newChatChecking && (
+              <ActivityIndicator size="small" color="#3a7afe" />
+            )}
+            {newChatExists === true && (
+              <Text style={{ color: "#33d18e", fontSize: 12 }}>
+                User found. You can start the chat.
+              </Text>
+            )}
+            {newChatExists === false && (
+              <Text style={{ color: "#ff7777", fontSize: 12 }}>
+                No user found with that email.
+              </Text>
+            )}
+          </View>
           <View style={styles.broadcastActions}>
             <TouchableOpacity
               style={styles.bcBtnCancel}
-              disabled={sendingBroadcast}
-              onPress={() => setBroadcastVisible(false)}
+              disabled={newChatChecking}
+              onPress={() => setNewChatVisible(false)}
             >
-              <Text style={styles.bcBtnCancelTxt}>Cancel</Text>
+              <Text style={styles.bcBtnCancelTxt}>Close</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.bcBtnSend, sendingBroadcast && { opacity: 0.6 }]}
-              disabled={sendingBroadcast}
-              onPress={sendBroadcast}
+              style={[
+                styles.bcBtnSend,
+                (!newChatExists || newChatChecking) && { opacity: 0.4 },
+              ]}
+              disabled={!newChatExists || newChatChecking}
+              onPress={() => {
+                setNewChatVisible(false);
+                navigation.navigate("ChatWindow", {
+                  contact: newChatEmail.trim(),
+                });
+              }}
             >
-              {sendingBroadcast ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.bcBtnSendTxt}>Send</Text>
-              )}
+              <Text style={styles.bcBtnSendTxt}>Open Chat</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -899,25 +911,23 @@ const styles = StyleSheet.create({
   },
   menuItem: { paddingHorizontal: 16, paddingVertical: 10 },
   menuTxt: { color: "#e9edef", fontSize: 13 },
-  searchBarRow: {
+  searchBarFancy: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#1f2c34",
-    paddingTop: (StatusBar.currentHeight || 0) + 4,
-    paddingBottom: 8,
-    paddingHorizontal: 4,
+    marginHorizontal: 12,
+    marginTop: (StatusBar.currentHeight || 0) + 4,
+    marginBottom: 6,
+    backgroundColor: "#1b2b3d",
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: "#24425f",
   },
-  searchInputFull: {
-    // reduced height
+  searchFancyInput: {
     flex: 1,
-    backgroundColor: "#233138",
-    marginRight: 10,
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 4, // reduced
     color: "#e9edef",
     fontSize: 14,
-    minHeight: 36,
+    paddingVertical: 6,
+    paddingHorizontal: 0,
   },
   archivedRow: {
     flexDirection: "row",

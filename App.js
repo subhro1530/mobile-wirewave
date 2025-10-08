@@ -9,6 +9,7 @@ import ChatWindowScreen from "./src/screens/ChatWindow";
 import { AuthProvider, AuthContext } from "./src/AuthContext";
 import Icon from "react-native-vector-icons/MaterialIcons";
 import { View, Text } from "react-native";
+import CommunitiesScreen from "./src/screens/CommunitiesScreen";
 
 // Empty screens for Communities and Updates
 function ComingSoonScreen({ title }) {
@@ -60,9 +61,7 @@ function MainTabs() {
       <Tab.Screen name="Updates">
         {() => <ComingSoonScreen title="Updates" />}
       </Tab.Screen>
-      <Tab.Screen name="Communities">
-        {() => <ComingSoonScreen title="Communities" />}
-      </Tab.Screen>
+      <Tab.Screen name="Communities" component={CommunitiesScreen} />
     </Tab.Navigator>
   );
 }
@@ -96,3 +95,4 @@ export default function App() {
     </AuthProvider>
   );
 }
+

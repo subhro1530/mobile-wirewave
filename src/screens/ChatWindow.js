@@ -176,8 +176,8 @@ export default function ChatWindowScreen() {
           <TouchableOpacity
             style={{ flex: 1, alignItems: "center", justifyContent: "center" }}
             onPress={() => {
-              // open profile from here by simple alert style fallback
-              Alert.alert("Contact", contact);
+              // replaced alert with noop or future profile modal trigger
+              // (profile shown via menu already)
             }}
           >
             <Text style={styles.headerAvatarTxt}>
