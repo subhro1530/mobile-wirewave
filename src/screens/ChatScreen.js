@@ -23,7 +23,7 @@ import API from "../api";
 import { AuthContext } from "../AuthContext";
 import Icon from "react-native-vector-icons/MaterialIcons";
 import { useNavigation } from "@react-navigation/native";
-import { TextInput } from "react-native-paper";
+import { TextInput as RNTextInput } from "react-native"; // added native input
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // Replace STYLE palette + UI layout
@@ -71,6 +71,8 @@ export default function ChatScreen() {
   const [myAvatar, setMyAvatar] = useState(null); // current user avatar
   const navigation = useNavigation();
   const debounceRef = useRef(null); // NEW debounce timer
+  const [toast, setToast] = useState(null); // { msg, type } type: 'success'|'error'
+  const toastTimerRef = useRef(null);
 
   // === AUTO EMAIL EXISTENCE CHECK (debounced) ===
   useEffect(() => {
@@ -99,11 +101,14 @@ export default function ChatScreen() {
   const testConnection = useCallback(async () => {
     try {
       const { data } = await API.get("/testdb");
-      Alert.alert("Server OK", `Status: ${data.status || "success"}`);
+      showToast(
+        data?.status ? `Server: ${data.status}` : "Server OK",
+        "success"
+      );
     } catch (e) {
-      Alert.alert("Connection Failed", e.message);
+      showToast(e.message || "Connection Failed", "error");
     }
-  }, []);
+  }, [showToast]);
 
   const deleteAccount = useCallback(() => {
     Alert.alert("Delete Account", "This cannot be undone. Continue?", [
@@ -114,14 +119,15 @@ export default function ChatScreen() {
         onPress: async () => {
           try {
             await API.delete("/account");
+            showToast("Account deleted", "success");
             logout?.();
           } catch (e) {
-            Alert.alert("Error", e.message);
+            showToast(e.message || "Delete failed", "error");
           }
         },
       },
     ]);
-  }, [logout]);
+  }, [logout, showToast]);
 
   // Load messages
   const loadMessages = useCallback(async () => {
@@ -270,13 +276,14 @@ export default function ChatScreen() {
       const { data } = await API[method]("/profile", payload);
       setProfileData(data);
       setProfileEditMode(false);
-      Alert.alert("Saved", "Profile updated");
+      showToast("Profile saved", "success");
     } catch (e) {
       setProfileError(e.message);
+      showToast(e.message || "Save failed", "error");
     } finally {
       setProfileLoading(false);
     }
-  }, [profileViewingEmail, userEmail, profileForm, profileData]);
+  }, [profileViewingEmail, userEmail, profileForm, profileData, showToast]);
 
   // Chat actions
   const toggleArchive = useCallback((email) => {
@@ -375,6 +382,12 @@ export default function ChatScreen() {
     };
   }, [contacts, contactAvatars]);
 
+  const showToast = useCallback((msg, type = "success", duration = 2800) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ msg, type });
+    toastTimerRef.current = setTimeout(() => setToast(null), duration);
+  }, []);
+
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: PALETTE.bg }]}>
       {/* Outside tap to close dropdown */}
@@ -424,49 +437,33 @@ export default function ChatScreen() {
           </TouchableOpacity>
         </View>
       ) : (
-        <View style={styles.searchBarSlim}>
-          <Icon
-            name="search"
-            size={18}
-            color="#6d7d92"
-            style={{ marginHorizontal: 10 }}
-          />
-          <TextInput
-            mode="flat"
-            style={styles.searchSlimInput}
-            placeholder="Search chats..."
-            placeholderTextColor="#6d7d92"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            underlineColor="transparent"
-            textColor="#e9edef"
-            theme={{
-              colors: {
-                primary: "#3a7afe",
-                background: "transparent",
-                surface: "transparent",
-                onSurface: "#e9edef",
-                text: "#e9edef",
-              },
-            }}
-          />
-          {!!searchQuery && (
-            <TouchableOpacity
-              onPress={() => setSearchQuery("")}
-              style={{ paddingHorizontal: 8, paddingVertical: 6 }}
-            >
-              <Icon name="close" size={18} color="#6d7d92" />
-            </TouchableOpacity>
-          )}
+        <View style={styles.searchRevertBar}>
           <TouchableOpacity
+            style={styles.searchRevertIconBtn}
             onPress={() => {
               setShowSearch(false);
               setSearchQuery("");
             }}
-            style={{ paddingHorizontal: 10, paddingVertical: 6 }}
           >
-            <Icon name="arrow-forward" size={18} color="#6d7d92" />
+            <Icon name="arrow-back" size={20} color="#9ab1c1" />
           </TouchableOpacity>
+          <RNTextInput
+            style={styles.searchRevertInput}
+            placeholder="Search chats"
+            placeholderTextColor="#6d7d92"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoFocus
+            selectionColor="#3a7afe"
+          />
+          {!!searchQuery && (
+            <TouchableOpacity
+              onPress={() => setSearchQuery("")}
+              style={styles.searchRevertIconBtn}
+            >
+              <Icon name="close" size={18} color="#9ab1c1" />
+            </TouchableOpacity>
+          )}
         </View>
       )}
 
@@ -834,7 +831,7 @@ export default function ChatScreen() {
               {profileViewingEmail === userEmail && profileEditMode ? (
                 <>
                   {/* editable inputs keep white text */}
-                  <TextInput
+                  <RNTextInput
                     style={styles.editInput}
                     placeholder="Name"
                     placeholderTextColor="#77818c"
@@ -843,7 +840,7 @@ export default function ChatScreen() {
                       setProfileForm((f) => ({ ...f, name: v }))
                     }
                   />
-                  <TextInput
+                  <RNTextInput
                     style={[styles.editInput, { height: 80 }]}
                     placeholder="About"
                     placeholderTextColor="#77818c"
@@ -853,7 +850,7 @@ export default function ChatScreen() {
                       setProfileForm((f) => ({ ...f, about: v }))
                     }
                   />
-                  <TextInput
+                  <RNTextInput
                     style={styles.editInput}
                     placeholder="Avatar URL"
                     placeholderTextColor="#77818c"
@@ -930,14 +927,14 @@ export default function ChatScreen() {
           <Text style={styles.profileMeta}>
             Enter an email. User existence auto‑checks.
           </Text>
-          <TextInput
+          <RNTextInput
             style={styles.broadcastInput}
             placeholder="user@example.com"
             placeholderTextColor={PALETTE.textSecondary}
             value={newChatEmail}
             autoCapitalize="none"
             keyboardType="email-address"
-            onChangeText={(v) => setNewChatEmail(v.trim())}
+            onChangeText={(v) => setNewChatEmail(v)} // changed: removed .trim()
           />
           <View style={{ minHeight: 26, justifyContent: "center" }}>
             {newChatChecking && (
@@ -981,6 +978,23 @@ export default function ChatScreen() {
         </View>
       </Modal>
 
+      {/* Toast */}
+      {toast && (
+        <View
+          style={[
+            styles.toastWrap,
+            toast.type === "error" ? styles.toastError : styles.toastSuccess,
+          ]}
+        >
+          <Icon
+            name={toast.type === "error" ? "error-outline" : "check-circle"}
+            size={16}
+            color="#fff"
+            style={{ marginRight: 8 }}
+          />
+          <Text style={styles.toastTxt}>{toast.msg}</Text>
+        </View>
+      )}
       {!!error && (
         <Text
           style={{ color: "#f55", paddingHorizontal: 12, paddingBottom: 4 }}
@@ -1046,24 +1060,31 @@ const styles = StyleSheet.create({
   },
   menuIcon: { marginRight: 10 },
   menuTxt: { color: "#e9edef", fontSize: 13 },
-  searchBarSlim: {
+  searchRevertBar: {
     flexDirection: "row",
     alignItems: "center",
-    marginHorizontal: 12,
-    marginTop: (StatusBar.currentHeight || 0) + 4,
-    marginBottom: 6,
-    backgroundColor: "#1f2c34",
-    borderRadius: 14,
+    backgroundColor: "#152632",
+    marginHorizontal: 10,
+    marginTop: (StatusBar.currentHeight || 0) + 6,
+    marginBottom: 8,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#2a3a48",
-    height: 44,
+    borderColor: "#203747",
+    paddingHorizontal: 4,
+    height: 50,
   },
-  searchSlimInput: {
+  searchRevertIconBtn: {
+    width: 42,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  searchRevertInput: {
     flex: 1,
-    backgroundColor: "transparent",
-    fontSize: 14,
-    paddingVertical: 2,
     color: "#e9edef",
+    fontSize: 14,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
   },
   archivedRow: {
     flexDirection: "row",
@@ -1331,8 +1352,31 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   // ensure search input text white
-  searchSlimInput: {
+  searchRevertInput: {
     // ...existing properties...
     color: "#e9edef",
   },
+  toastWrap: {
+    position: "absolute",
+    left: 18,
+    right: 18,
+    bottom: 90,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    elevation: 6,
+  },
+  toastSuccess: {
+    backgroundColor: "#1d3d55",
+    borderWidth: 1,
+    borderColor: "#2e5d7d",
+  },
+  toastError: {
+    backgroundColor: "#552222",
+    borderWidth: 1,
+    borderColor: "#7d3a3a",
+  },
+  toastTxt: { color: "#fff", fontSize: 13, flexShrink: 1 },
 });

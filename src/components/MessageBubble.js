@@ -96,23 +96,4 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 2,
   },
-  tailOther: {
-    left: -4,
-    backgroundColor: COLORS.other,
-    borderBottomRightRadius: 2,
-  },
-  text: { color: COLORS.text, fontSize: 14, lineHeight: 18 },
-  time: {
-    fontSize: 10,
-    color: COLORS.time,
-    textAlign: "right",
-    marginTop: 4,
-    opacity: 0.75,
-  },
-  metaRow: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    alignItems: "center",
-    marginTop: 2,
-  },
 });

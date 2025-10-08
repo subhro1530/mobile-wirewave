@@ -52,9 +52,10 @@ export default function ChatWindowScreen() {
   const [profileData, setProfileData] = useState(null);
   const [profileError, setProfileError] = useState(null);
   const [avatarUrl, setAvatarUrl] = useState(null);
-  const [showEmoji, setShowEmoji] = useState(false);
-  const [shareVisible, setShareVisible] = useState(false);
-
+  const [emojiVisible, setEmojiVisible] = useState(false); // replaces showEmoji panel
+  const [shareVisible, setShareVisible] = useState(false); // FIX: added missing state
+  const [toast, setToast] = useState(null); // {msg,type}
+  const toastRef = useRef(null);
   const chatRef = useRef(null);
 
   const loadMessages = useCallback(async () => {
@@ -177,20 +178,222 @@ export default function ChatWindowScreen() {
     };
   }, [contact]);
 
-  const quickEmojis = ["😀", "😉", "🔥", "👍", "❤️", "😂", "🚀", "🙏"];
+  const showToast = useCallback((msg, type = "success", duration = 2300) => {
+    if (toastRef.current) clearTimeout(toastRef.current);
+    setToast({ msg, type });
+    toastRef.current = setTimeout(() => setToast(null), duration);
+  }, []);
+
+  const largeEmojis = [
+    "😀",
+    "😃",
+    "😄",
+    "😁",
+    "😆",
+    "😅",
+    "🤣",
+    "😂",
+    "🙂",
+    "🙃",
+    "😉",
+    "😊",
+    "😇",
+    "🥰",
+    "😍",
+    "🤩",
+    "😘",
+    "😗",
+    "😚",
+    "😋",
+    "😜",
+    "🤪",
+    "🤗",
+    "🤫",
+    "🤔",
+    "🤨",
+    "😐",
+    "😑",
+    "😶",
+    "😏",
+    "😒",
+    "🙄",
+    "😬",
+    "🤥",
+    "😌",
+    "😴",
+    "😪",
+    "🤤",
+    "😷",
+    "🤒",
+    "🤕",
+    "🤢",
+    "🤮",
+    "🤧",
+    "🥵",
+    "🥶",
+    "🥴",
+    "😵",
+    "🤯",
+    "🤠",
+    "🥳",
+    "😎",
+    "🤓",
+    "🧐",
+    "😕",
+    "😟",
+    "🙁",
+    "☹️",
+    "😮",
+    "😯",
+    "😲",
+    "😳",
+    "🥺",
+    "😢",
+    "😭",
+    "😤",
+    "😠",
+    "😡",
+    "🤬",
+    "😇",
+    "🤡",
+    "👻",
+    "💀",
+    "☠️",
+    "👽",
+    "🤖",
+    "💩",
+    "😺",
+    "😸",
+    "😹",
+    "😻",
+    "😼",
+    "😽",
+    "🙀",
+    "😿",
+    "😾",
+    "❤️",
+    "🧡",
+    "💛",
+    "💚",
+    "💙",
+    "💜",
+    "🖤",
+    "🤍",
+    "🤎",
+    "💔",
+    "❣️",
+    "💕",
+    "💞",
+    "💓",
+    "💗",
+    "💖",
+    "💘",
+    "💝",
+    "💟",
+    "✨",
+    "⚡",
+    "🔥",
+    "💥",
+    "🌟",
+    "🌈",
+    "☀️",
+    "🌤️",
+    "⛅",
+    "🌧️",
+    "❄️",
+    "☔",
+    "💧",
+    "🌊",
+    "🍎",
+    "🍇",
+    "🍉",
+    "🍌",
+    "🍓",
+    "🍒",
+    "🍑",
+    "🥭",
+    "🍍",
+    "🥝",
+    "🥑",
+    "🍆",
+    "🥕",
+    "🌶️",
+    "🌽",
+    "🥔",
+    "🍟",
+    "🍕",
+    "🍔",
+    "🌮",
+    "🌯",
+    "🥗",
+    "🍱",
+    "🍣",
+    "🍤",
+    "🍜",
+    "🍝",
+    "🍰",
+    "🧁",
+    "🍫",
+    "🍿",
+    "🍩",
+    "🍪",
+    "🥛",
+    "🍼",
+    "☕",
+    "🍵",
+    "🍺",
+    "🍻",
+    "🥂",
+    "🍷",
+    "🥃",
+    "🍸",
+    "🚀",
+    "✈️",
+    "🚗",
+    "🚕",
+    "🚙",
+    "🚌",
+    "🚎",
+    "🏎️",
+    "🚓",
+    "🚑",
+    "🚒",
+    "🚐",
+    "🚲",
+    "🛴",
+    "🏍️",
+    "🛵",
+    "⚽",
+    "🏀",
+    "🏈",
+    "⚾",
+    "🎾",
+    "🏐",
+    "🏉",
+    "🎱",
+    "🏓",
+    "🏸",
+    "🥊",
+    "🥋",
+    "🎯",
+    "🎮",
+    "🎲",
+    "🎼",
+    "🎹",
+    "🥁",
+  ];
+
   const insertEmoji = (e) => {
     setText((t) => t + e);
-    setTimeout(() => chatRef.current?.scrollToBottom?.(), 40);
+    showToast("Emoji added");
+    setTimeout(() => chatRef.current?.scrollToBottom?.(), 30);
   };
 
   return (
     <View style={styles.root}>
       {/* Outside overlay for dropdown */}
       {menuOpen && (
-        <Pressable
-          onPress={() => setMenuOpen(false)}
-          style={styles.overlay}
-        >
+        <Pressable onPress={() => setMenuOpen(false)} style={styles.overlay}>
           <View />
         </Pressable>
       )}
@@ -291,7 +494,7 @@ export default function ChatWindowScreen() {
           currentUserEmail={userEmail}
           onRefresh={loadMessages}
           onClear={() => {}}
-          bottomInset={showEmoji ? 170 : 70}
+          bottomInset={emojiVisible ? 320 : 70}
         />
 
         {/* Composer */}
@@ -302,11 +505,12 @@ export default function ChatWindowScreen() {
           ]}
         >
           <View style={styles.inputRow}>
+            {/* Emoji button updated to match gallery button style */}
             <TouchableOpacity
               style={styles.iconSmall}
-              onPress={() => setShowEmoji((v) => !v)}
+              onPress={() => setEmojiVisible(true)}
             >
-              <Text style={{ fontSize: 20 }}>😊</Text>
+              <Icon name="emoji-emotions" size={22} color="#8696a0" />
             </TouchableOpacity>
             <TextInput
               style={styles.input}
@@ -337,19 +541,55 @@ export default function ChatWindowScreen() {
           </TouchableOpacity>
         </View>
 
-        {showEmoji && (
-          <View style={styles.emojiBar}>
-            {quickEmojis.map((em) => (
-              <TouchableOpacity
-                key={em}
-                onPress={() => insertEmoji(em)}
-                style={styles.emojiBtn}
-              >
-                <Text style={styles.emojiTxt}>{em}</Text>
-              </TouchableOpacity>
-            ))}
+        {toast && (
+          <View
+            style={[
+              styles.toastWrap,
+              toast.type === "error" ? styles.toastErr : styles.toastOk,
+            ]}
+          >
+            <Icon
+              name={toast.type === "error" ? "error-outline" : "check-circle"}
+              size={16}
+              color="#fff"
+              style={{ marginRight: 8 }}
+            />
+            <Text style={styles.toastTxt}>{toast.msg}</Text>
           </View>
         )}
+
+        <Modal
+          transparent
+          visible={emojiVisible}
+          animationType="fade"
+          onRequestClose={() => setEmojiVisible(false)}
+        >
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => setEmojiVisible(false)}
+          >
+            <View />
+          </Pressable>
+          <View style={styles.emojiSheet}>
+            <View style={styles.emojiSheetHeader}>
+              <Text style={styles.emojiSheetTitle}>Emojis</Text>
+              <TouchableOpacity onPress={() => setEmojiVisible(false)}>
+                <Icon name="close" size={20} color="#9ab1c1" />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.emojiGrid}>
+              {largeEmojis.map((em, i) => (
+                <TouchableOpacity
+                  key={`${em}_${i}`} // unique key (emoji may repeat)
+                  style={styles.emojiCell}
+                  onPress={() => insertEmoji(em)}
+                >
+                  <Text style={styles.emojiCellTxt}>{em}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        </Modal>
       </KeyboardAvoidingView>
 
       {/* Profile Modal */}
@@ -419,25 +659,31 @@ export default function ChatWindowScreen() {
               label="Media"
               color="#5c6ef8"
               icon="image"
-              onPress={() => Alert.alert("Media", "Not implemented")}
+              onPress={() => showToast("Media picker not implemented", "error")}
             />
             <ShareItem
               label="Documents"
               color="#8e61d6"
               icon="description"
-              onPress={() => Alert.alert("Documents", "Not implemented")}
+              onPress={() =>
+                showToast("Documents picker not implemented", "error")
+              }
             />
             <ShareItem
               label="Location"
               color="#17a884"
               icon="place"
-              onPress={() => Alert.alert("Location", "Not implemented")}
+              onPress={() =>
+                showToast("Location sharing not implemented", "error")
+              }
             />
             <ShareItem
               label="Contact"
               color="#e08922"
               icon="person"
-              onPress={() => Alert.alert("Contact", "Not implemented")}
+              onPress={() =>
+                showToast("Contact sharing not implemented", "error")
+              }
             />
             <ShareItem
               label="Close"
@@ -598,22 +844,70 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
-  emojiBar: {
+  toastWrap: {
+    position: "absolute",
+    left: 18,
+    right: 18,
+    bottom: 90,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    elevation: 5,
+  },
+  toastOk: {
+    backgroundColor: "#1d3d55",
+    borderWidth: 1,
+    borderColor: "#2d5773",
+  },
+  toastErr: {
+    backgroundColor: "#552326",
+    borderWidth: 1,
+    borderColor: "#7d3a3f",
+  },
+  toastTxt: { color: "#fff", fontSize: 13, flexShrink: 1 },
+  emojiSheet: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "#142332",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 12,
+    paddingBottom: 22,
+    borderWidth: 1,
+    borderColor: "#203b52",
+    maxHeight: 360,
+  },
+  emojiSheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 18,
+    marginBottom: 6,
+  },
+  emojiSheetTitle: {
+    flex: 1,
+    color: "#e9edef",
+    fontWeight: "600",
+    fontSize: 14,
+  },
+  emojiGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    backgroundColor: "#192530",
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    borderTopWidth: 1,
-    borderColor: "#223241",
-  },
-  emojiBtn: {
     paddingHorizontal: 6,
-    paddingVertical: 4,
-    borderRadius: 6,
-    margin: 2,
   },
-  emojiTxt: { fontSize: 22 },
+  emojiCell: {
+    width: "11.11%",
+    aspectRatio: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    marginVertical: 2,
+  },
+  emojiCellTxt: {
+    fontSize: 24,
+  },
   shareSheet: {
     position: "absolute",
     left: 0,
