@@ -17,6 +17,7 @@ import {
   Image,
   Modal,
   Pressable,
+  Alert,
 } from "react-native";
 import API from "../api";
 import { AuthContext } from "../AuthContext";
@@ -26,14 +27,15 @@ import { TextInput } from "react-native-paper";
 
 // Replace STYLE palette + UI layout
 const PALETTE = {
-  brandBar: "#008069",
-  brandAccent: "#25D366",
+  brandBar: "#14233a", // deep bg matching icon shadow
+  brandAccent: "#3a7afe",
   bg: "#0b141a",
   bgList: "#111b21",
-  row: "#111b21",
+  row: "#121d2b",
   rowBorder: "#1f2c34",
   textPrimary: "#e9edef",
   textSecondary: "#8696a0",
+  accentSoft: "#2b5fcc",
 };
 
 export default function ChatScreen() {
@@ -48,6 +50,10 @@ export default function ChatScreen() {
   const [profileData, setProfileData] = useState(null);
   const [profileError, setProfileError] = useState(null);
   const [showSearch, setShowSearch] = useState(false); // new
+  const [broadcastVisible, setBroadcastVisible] = useState(false); // new
+  const [broadcastRecipients, setBroadcastRecipients] = useState(""); // new
+  const [broadcastContent, setBroadcastContent] = useState(""); // new
+  const [sendingBroadcast, setSendingBroadcast] = useState(false); // new
   const navigation = useNavigation();
 
   // Load messages
@@ -115,6 +121,60 @@ export default function ChatScreen() {
     }
   }, []);
 
+  const testConnection = useCallback(async () => {
+    try {
+      const { data } = await API.get("/testdb");
+      Alert.alert("Server OK", `Status: ${data.status || "success"}`);
+    } catch (e) {
+      Alert.alert("Connection Failed", e.message);
+    }
+  }, []);
+
+  const deleteAccount = useCallback(async () => {
+    Alert.alert("Delete Account", "This cannot be undone. Continue?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await API.delete("/account");
+            logout?.();
+          } catch (e) {
+            Alert.alert("Error", e.message);
+          }
+        },
+      },
+    ]);
+  }, [logout]);
+
+  const sendBroadcast = useCallback(async () => {
+    const emails = broadcastRecipients
+      .split(/[,;\s]+/)
+      .map((e) => e.trim())
+      .filter((e) => e && e.includes("@") && e !== userEmail);
+    if (!emails.length || !broadcastContent.trim()) {
+      Alert.alert("Missing Data", "Provide recipients & content.");
+      return;
+    }
+    setSendingBroadcast(true);
+    try {
+      await API.post("/messages/multi", {
+        receiver_emails: emails,
+        content: broadcastContent.trim(),
+      });
+      setBroadcastContent("");
+      setBroadcastRecipients("");
+      setBroadcastVisible(false);
+      loadMessages();
+      Alert.alert("Sent", "Broadcast delivered.");
+    } catch (e) {
+      Alert.alert("Error", e.message);
+    } finally {
+      setSendingBroadcast(false);
+    }
+  }, [broadcastRecipients, broadcastContent, userEmail, loadMessages]);
+
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: PALETTE.bg }]}>
       <StatusBar
@@ -125,10 +185,12 @@ export default function ChatScreen() {
       {/* Top Bar */}
       {!showSearch ? (
         <View style={styles.topBar}>
-          <Text style={styles.appTitle}>WireWave</Text>
-          <TouchableOpacity style={styles.topIcon}>
-            <Icon name="photo-camera" size={20} color={PALETTE.textPrimary} />
-          </TouchableOpacity>
+          <Image
+            source={require("../../assets/logo.png")}
+            style={styles.logoImg}
+            resizeMode="contain"
+          />
+          <View style={{ flex: 1 }} />
           <TouchableOpacity
             style={styles.topIcon}
             onPress={() => setShowSearch(true)}
@@ -177,6 +239,35 @@ export default function ChatScreen() {
             }}
           >
             <Text style={styles.menuTxt}>My Profile</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => {
+              setShowMenu(false);
+              setBroadcastVisible(true);
+            }}
+          >
+            <Text style={styles.menuTxt}>Broadcast Message</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => {
+              setShowMenu(false);
+              testConnection();
+            }}
+          >
+            <Text style={styles.menuTxt}>Test Connection</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => {
+              setShowMenu(false);
+              deleteAccount();
+            }}
+          >
+            <Text style={[styles.menuTxt, { color: "#ff7777" }]}>
+              Delete Account
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.menuItem}
@@ -289,10 +380,10 @@ export default function ChatScreen() {
 
       {/* Floating Action Button */}
       <TouchableOpacity
-        style={styles.fab}
-        onPress={() => {
-          // placeholder new chat
-        }}
+        style={[styles.fab, { backgroundColor: PALETTE.brandAccent }]}
+        onPress={() => setBroadcastVisible(true)}
+        onLongPress={() => setShowSearch(true)}
+        delayLongPress={350}
       >
         <Icon name="chat" size={26} color="#fff" />
       </TouchableOpacity>
@@ -347,6 +438,65 @@ export default function ChatScreen() {
           </TouchableOpacity>
         </View>
       </Modal>
+
+      {/* Broadcast Modal */}
+      <Modal
+        transparent
+        visible={broadcastVisible}
+        animationType="slide"
+        onRequestClose={() => !sendingBroadcast && setBroadcastVisible(false)}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => !sendingBroadcast && setBroadcastVisible(false)}
+        >
+          <View />
+        </Pressable>
+        <View style={[styles.modalCard, { top: "18%" }]}>
+          <Text style={styles.profileEmail}>Broadcast</Text>
+          <Text style={styles.profileMeta}>
+            Separate multiple emails with commas or spaces.
+          </Text>
+          <TextInput
+            style={styles.broadcastInput}
+            placeholder="Recipients (emails)"
+            placeholderTextColor={PALETTE.textSecondary}
+            value={broadcastRecipients}
+            onChangeText={setBroadcastRecipients}
+            autoCapitalize="none"
+            multiline
+          />
+          <TextInput
+            style={[styles.broadcastInput, { height: 90 }]}
+            placeholder="Message content"
+            placeholderTextColor={PALETTE.textSecondary}
+            value={broadcastContent}
+            onChangeText={setBroadcastContent}
+            multiline
+          />
+          <View style={styles.broadcastActions}>
+            <TouchableOpacity
+              style={styles.bcBtnCancel}
+              disabled={sendingBroadcast}
+              onPress={() => setBroadcastVisible(false)}
+            >
+              <Text style={styles.bcBtnCancelTxt}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.bcBtnSend, sendingBroadcast && { opacity: 0.6 }]}
+              disabled={sendingBroadcast}
+              onPress={sendBroadcast}
+            >
+              {sendingBroadcast ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.bcBtnSendTxt}>Send</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {!!error && (
         <Text
           style={{ color: "#f55", paddingHorizontal: 12, paddingBottom: 4 }}
@@ -370,6 +520,7 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     backgroundColor: PALETTE.brandBar,
   },
+  logoImg: { width: 40, height: 40, marginRight: 6 },
   appTitle: {
     fontSize: 20,
     fontWeight: "700",
@@ -395,12 +546,12 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: (StatusBar.currentHeight || 0) + 58,
     right: 8,
-    backgroundColor: "#233138",
+    backgroundColor: "#132235",
     borderRadius: 8,
     paddingVertical: 6,
     minWidth: 170,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#2d3d44",
+    borderColor: "#20344e",
     zIndex: 50,
   },
   menuItem: { paddingHorizontal: 16, paddingVertical: 10 },
@@ -444,7 +595,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     paddingHorizontal: 16,
     paddingVertical: 10,
-    backgroundColor: "#111b21",
+    backgroundColor: PALETTE.row,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "#1f2c34",
   },
@@ -498,6 +649,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     elevation: 8,
+    shadowColor: "#3a7afe",
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
   },
   encryptNoteWrap: {
     position: "absolute",
@@ -547,4 +702,30 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
     marginBottom: 8,
   },
+  broadcastInput: {
+    backgroundColor: "#1a2b42",
+    marginTop: 12,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: "#fff",
+    fontSize: 13,
+    borderWidth: 1,
+    borderColor: "#253a57",
+  },
+  broadcastActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    marginTop: 16,
+  },
+  bcBtnCancel: { paddingHorizontal: 14, paddingVertical: 10 },
+  bcBtnCancelTxt: { color: "#8696a0", fontSize: 14 },
+  bcBtnSend: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: "#3a7afe",
+    borderRadius: 24,
+    marginLeft: 4,
+  },
+  bcBtnSendTxt: { color: "#fff", fontWeight: "600" },
 });

@@ -18,8 +18,8 @@ import MessageBubble from "./MessageBubble";
 
 const THEME = {
   bg: "#0b141a",
-  dateBg: "#1f2c34",
-  dateText: "#8696a0",
+  dateBg: "#16273a",
+  dateText: "#7e93ad",
 };
 
 function groupByDate(list) {
@@ -181,7 +181,7 @@ export default forwardRef(function ChatWindow(
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  list: { padding: 10, paddingBottom: 40 },
+  list: { padding: 10, paddingBottom: 40, backgroundColor: "transparent" },
   dateWrap: {
     alignSelf: "center",
     paddingHorizontal: 12,

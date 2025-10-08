@@ -118,6 +118,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     color: "#fff",
     marginBottom: 15,
+    borderWidth: 1,
+    borderColor: "#25304a",
   },
   actionButton: {
     flexDirection: "row",
@@ -127,6 +129,11 @@ const styles = StyleSheet.create({
     height: 56,
     borderRadius: 28,
     marginTop: 6,
+    shadowColor: "#3a7afe",
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
   },
   actionButtonText: {
     color: "#fff",

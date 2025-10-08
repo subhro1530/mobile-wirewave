@@ -16,6 +16,9 @@ import {
   TextInput,
   ActivityIndicator,
   Keyboard,
+  Alert,
+  Modal,
+  Pressable,
 } from "react-native";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import { AuthContext } from "../AuthContext";
@@ -43,6 +46,11 @@ export default function ChatWindowScreen() {
   const [loadingSend, setLoadingSend] = useState(false);
   const [text, setText] = useState("");
   const [keyboardOffset, setKeyboardOffset] = useState(0);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [profileVisible, setProfileVisible] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileData, setProfileData] = useState(null);
+  const [profileError, setProfileError] = useState(null);
   const chatRef = useRef(null);
 
   const loadMessages = useCallback(async () => {
@@ -116,6 +124,39 @@ export default function ChatWindowScreen() {
     };
   }, []);
 
+  const loadProfile = useCallback(async () => {
+    setProfileVisible(true);
+    setProfileLoading(true);
+    setProfileError(null);
+    setProfileData(null);
+    try {
+      const { data } = await API.get(
+        `/users/search?email=${encodeURIComponent(contact)}`
+      );
+      setProfileData(data);
+    } catch (e) {
+      setProfileError(e.message);
+    } finally {
+      setProfileLoading(false);
+    }
+  }, [contact]);
+
+  const deleteChat = useCallback(() => {
+    Alert.alert("Delete Chat", `Delete chat with ${contact}?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await API.delete(`/messages/${encodeURIComponent(contact)}`);
+          } catch {}
+          navigation.goBack();
+        },
+      },
+    ]);
+  }, [contact, navigation]);
+
   return (
     <View style={styles.root}>
       <StatusBar
@@ -150,10 +191,45 @@ export default function ChatWindowScreen() {
         <TouchableOpacity style={styles.iconBtn}>
           <Icon name="call" size={20} color="#fff" />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.iconBtn}>
+        <TouchableOpacity
+          style={styles.iconBtn}
+          onPress={() => setMenuOpen((v) => !v)}
+        >
           <Icon name="more-vert" size={22} color="#fff" />
         </TouchableOpacity>
       </View>
+      {menuOpen && (
+        <View style={styles.dropdown}>
+          <TouchableOpacity
+            style={styles.dropdownItem}
+            onPress={() => {
+              setMenuOpen(false);
+              loadProfile();
+            }}
+          >
+            <Text style={styles.dropdownTxt}>View Profile</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.dropdownItem}
+            onPress={() => {
+              setMenuOpen(false);
+              deleteChat();
+            }}
+          >
+            <Text style={[styles.dropdownTxt, { color: "#ff6b6b" }]}>
+              Delete Chat
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.dropdownItem}
+            onPress={() => setMenuOpen(false)}
+          >
+            <Text style={[styles.dropdownTxt, { color: "#8696a0" }]}>
+              Close
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -209,6 +285,50 @@ export default function ChatWindowScreen() {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+
+      <Modal
+        transparent
+        visible={profileVisible}
+        animationType="fade"
+        onRequestClose={() => setProfileVisible(false)}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setProfileVisible(false)}
+        >
+          <View />
+        </Pressable>
+        <View style={styles.profileCard}>
+          {profileLoading ? (
+            <ActivityIndicator color="#3a7afe" />
+          ) : profileError ? (
+            <Text style={{ color: "#f55" }}>{profileError}</Text>
+          ) : profileData ? (
+            <>
+              <Text style={styles.profileTitle}>{contact}</Text>
+              {profileData.name && (
+                <Text style={styles.profileName}>{profileData.name}</Text>
+              )}
+              {profileData.about && (
+                <Text style={styles.profileAbout}>{profileData.about}</Text>
+              )}
+              {profileData.avatar_url && (
+                <Text style={styles.profileMeta}>
+                  Avatar: {profileData.avatar_url}
+                </Text>
+              )}
+            </>
+          ) : (
+            <Text style={{ color: "#ccc" }}>No profile data.</Text>
+          )}
+          <TouchableOpacity
+            onPress={() => setProfileVisible(false)}
+            style={{ alignSelf: "flex-end", marginTop: 16 }}
+          >
+            <Text style={{ color: "#3a7afe", fontWeight: "600" }}>Close</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -292,4 +412,49 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  dropdown: {
+    position: "absolute",
+    top: (StatusBar.currentHeight || 0) + 54,
+    right: 4,
+    backgroundColor: "#142432",
+    borderRadius: 10,
+    paddingVertical: 4,
+    minWidth: 160,
+    borderWidth: 1,
+    borderColor: "#1e3547",
+  },
+  dropdownItem: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  dropdownTxt: { color: "#fff", fontSize: 13 },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.55)",
+  },
+  profileCard: {
+    position: "absolute",
+    left: 30,
+    right: 30,
+    top: "28%",
+    backgroundColor: "#182636",
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: "#28435b",
+  },
+  profileTitle: { color: "#fff", fontSize: 16, fontWeight: "600" },
+  profileName: {
+    color: "#3a7afe",
+    marginTop: 6,
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  profileAbout: {
+    color: "#9db2c9",
+    marginTop: 6,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  profileMeta: { color: "#657b92", marginTop: 8, fontSize: 11 },
 });

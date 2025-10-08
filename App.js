@@ -33,17 +33,17 @@ const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
 
 function MainTabs() {
-  const BRAND_PRIMARY = "#008069";
+  const BRAND_PRIMARY = "#3a7afe"; // updated to icon blue
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: "#111b21",
-          borderTopColor: "#1f2c34",
+          backgroundColor: "#0d1220",
+          borderTopColor: "#1d2740",
         },
         tabBarActiveTintColor: BRAND_PRIMARY,
-        tabBarInactiveTintColor: "#8696a0",
+        tabBarInactiveTintColor: "#7c8aa8",
         tabBarIcon: ({ color, size }) => {
           if (route.name === "Chats")
             return <Icon name="chat" color={color} size={size} />;
