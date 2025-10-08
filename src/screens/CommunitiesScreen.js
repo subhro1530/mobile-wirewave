@@ -43,6 +43,7 @@ export default function CommunitiesScreen() {
   const [selected, setSelected] = useState(new Set());
   const [content, setContent] = useState("");
   const [showInfo, setShowInfo] = useState(false);
+  const [broadcastVisible, setBroadcastVisible] = useState(false); // NEW (replaces always-on UI)
 
   const loadMessages = useCallback(async () => {
     try {
@@ -128,147 +129,151 @@ export default function CommunitiesScreen() {
         backgroundColor="transparent"
         barStyle="light-content"
       />
-      {/* Top bar */}
       <View style={styles.topBar}>
-        <Text style={styles.title}>Broadcast</Text>
+        <Text style={styles.title}>Communities</Text>
         <View style={{ flex: 1 }} />
         <TouchableOpacity
           style={styles.iconBtn}
-          onPress={() => setShowInfo(true)}
+          onPress={() => setBroadcastVisible(true)}
         >
-          <Icon name="info" size={20} color="#fff" />
+          <Icon name="mic" size={20} color="#fff" />
         </TouchableOpacity>
       </View>
 
-      {/* Search */}
-      <View style={styles.searchBar}>
-        <Icon
-          name="search"
-          size={18}
-          color="#6d7d92"
-          style={{ marginHorizontal: 10 }}
-        />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search people"
-          placeholderTextColor="#6d7d92"
-          value={search}
-          onChangeText={setSearch}
-        />
-        {search.length > 0 && (
-          <TouchableOpacity
-            onPress={() => setSearch("")}
-            style={{ paddingHorizontal: 8 }}
-          >
-            <Icon name="close" size={18} color="#6d7d92" />
-          </TouchableOpacity>
-        )}
+      <View style={styles.placeholder}>
+        <Text style={styles.placeholderTitle}>No communities yet</Text>
+        <Text style={styles.placeholderSub}>
+          Tap the mic icon to send a broadcast
+        </Text>
       </View>
 
-      {/* Contact list */}
-      {loading ? (
-        <ActivityIndicator style={{ marginTop: 30 }} color={C.accent} />
-      ) : (
-        <FlatList
-          data={filtered}
-          keyExtractor={(i) => i.email}
-          contentContainerStyle={{ paddingBottom: 140 }}
-          renderItem={({ item }) => {
-            const active = selected.has(item.email);
-            return (
-              <TouchableOpacity
-                style={[styles.contactRow, active && styles.rowActive]}
-                onPress={() => toggle(item.email)}
-              >
-                <View style={[styles.avatar, active && styles.avatarActive]}>
-                  {active ? (
-                    <Icon name="check" size={18} color="#fff" />
-                  ) : (
-                    <Text style={styles.avatarTxt}>
-                      {item.email.slice(0, 2).toUpperCase()}
-                    </Text>
-                  )}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.email} numberOfLines={1}>
-                    {item.email}
-                  </Text>
-                  <Text style={styles.preview} numberOfLines={1}>
-                    {item.lastMessage || "No messages yet"}
-                  </Text>
-                </View>
-                {active && (
-                  <Icon
-                    name="campaign"
-                    size={18}
-                    color={C.accent}
-                    style={{ marginLeft: 6 }}
-                  />
-                )}
-              </TouchableOpacity>
-            );
-          }}
-          ListEmptyComponent={
-            <View style={{ padding: 40, alignItems: "center" }}>
-              <Text style={{ color: C.sub }}>No contacts yet</Text>
-            </View>
-          }
-        />
-      )}
-
-      {/* Composer */}
-      <View style={styles.composer}>
-        <Text style={styles.countTxt}>{selected.size} selected</Text>
-        <View style={styles.messageBox}>
-          <TextInput
-            style={styles.messageInput}
-            multiline
-            placeholder="Broadcast message"
-            placeholderTextColor="#5f6d7c"
-            value={content}
-            onChangeText={setContent}
-          />
-          <TouchableOpacity
-            style={[
-              styles.sendBtn,
-              (!content.trim() || !selected.size || sending) && {
-                opacity: 0.45,
-              },
-            ]}
-            disabled={!content.trim() || !selected.size || sending}
-            onPress={sendBroadcast}
-          >
-            {sending ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
-              <Icon name="send" size={18} color="#fff" />
-            )}
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Info modal */}
+      {/* Broadcast Modal (previous full-screen UI) */}
       <Modal
         transparent
-        visible={showInfo}
+        visible={broadcastVisible}
         animationType="fade"
-        onRequestClose={() => setShowInfo(false)}
+        onRequestClose={() => !sending && setBroadcastVisible(false)}
       >
-        <Pressable style={styles.backdrop} onPress={() => setShowInfo(false)}>
+        <Pressable
+          style={styles.backdrop}
+          onPress={() => !sending && setBroadcastVisible(false)}
+        >
           <View />
         </Pressable>
-        <View style={styles.infoCard}>
-          <Text style={styles.infoTitle}>Broadcasts</Text>
-          <Text style={styles.infoBody}>
-            Select previously messaged users and send a one‑time broadcast. Each
-            recipient receives it as a normal direct message.
-          </Text>
-          <TouchableOpacity
-            onPress={() => setShowInfo(false)}
-            style={{ alignSelf: "flex-end", marginTop: 12 }}
-          >
-            <Text style={{ color: C.accent, fontWeight: "600" }}>Close</Text>
-          </TouchableOpacity>
+        <View style={styles.broadcastCard}>
+          <View style={styles.modalHeaderRow}>
+            <Text style={styles.infoTitle}>Broadcast</Text>
+            <TouchableOpacity
+              onPress={() => setBroadcastVisible(false)}
+              style={{ padding: 4 }}
+            >
+              <Icon name="close" size={20} color="#e9edef" />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.searchBar}>
+            <Icon
+              name="search"
+              size={18}
+              color="#6d7d92"
+              style={{ marginHorizontal: 10 }}
+            />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search people"
+              placeholderTextColor="#6d7d92"
+              value={search}
+              onChangeText={setSearch}
+            />
+            {search.length > 0 && (
+              <TouchableOpacity
+                onPress={() => setSearch("")}
+                style={{ paddingHorizontal: 8 }}
+              >
+                <Icon name="close" size={18} color="#6d7d92" />
+              </TouchableOpacity>
+            )}
+          </View>
+          {loading ? (
+            <ActivityIndicator style={{ marginTop: 20 }} color={C.accent} />
+          ) : (
+            <FlatList
+              data={filtered}
+              keyExtractor={(i) => i.email}
+              contentContainerStyle={{ paddingBottom: 120 }}
+              style={{ maxHeight: 260, marginTop: 4 }}
+              renderItem={({ item }) => {
+                const active = selected.has(item.email);
+                return (
+                  <TouchableOpacity
+                    style={[styles.contactRow, active && styles.rowActive]}
+                    onPress={() => toggle(item.email)}
+                  >
+                    <View
+                      style={[styles.avatar, active && styles.avatarActive]}
+                    >
+                      {active ? (
+                        <Icon name="check" size={18} color="#fff" />
+                      ) : (
+                        <Text style={styles.avatarTxt}>
+                          {item.email.slice(0, 2).toUpperCase()}
+                        </Text>
+                      )}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.email} numberOfLines={1}>
+                        {item.email}
+                      </Text>
+                      <Text style={styles.preview} numberOfLines={1}>
+                        {item.lastMessage || "No messages yet"}
+                      </Text>
+                    </View>
+                    {active && (
+                      <Icon
+                        name="campaign"
+                        size={18}
+                        color={C.accent}
+                        style={{ marginLeft: 6 }}
+                      />
+                    )}
+                  </TouchableOpacity>
+                );
+              }}
+              ListEmptyComponent={
+                <View style={{ padding: 24, alignItems: "center" }}>
+                  <Text style={{ color: C.sub, fontSize: 12 }}>
+                    No contacts yet
+                  </Text>
+                </View>
+              }
+            />
+          )}
+          <Text style={styles.countTxt}>{selected.size} selected</Text>
+          <View style={styles.messageBox}>
+            <TextInput
+              style={styles.messageInput}
+              multiline
+              placeholder="Broadcast message"
+              placeholderTextColor="#5f6d7c"
+              value={content}
+              onChangeText={setContent}
+            />
+            <TouchableOpacity
+              style={[
+                styles.sendBtn,
+                (!content.trim() || !selected.size || sending) && {
+                  opacity: 0.45,
+                },
+              ]}
+              disabled={!content.trim() || !selected.size || sending}
+              onPress={sendBroadcast}
+            >
+              {sending ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Icon name="send" size={18} color="#fff" />
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </Modal>
     </SafeAreaView>
@@ -295,6 +300,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  placeholder: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+  },
+  placeholderTitle: { color: C.text, fontSize: 16, fontWeight: "600" },
+  placeholderSub: { color: C.sub, fontSize: 12, marginTop: 6 },
   searchBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -339,17 +352,21 @@ const styles = StyleSheet.create({
   avatarTxt: { color: "#fff", fontWeight: "600" },
   email: { color: C.text, fontWeight: "600", fontSize: 14 },
   preview: { color: C.sub, fontSize: 11, marginTop: 2 },
-  composer: {
+  broadcastCard: {
     position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingHorizontal: 12,
-    paddingTop: 8,
-    paddingBottom: 12,
-    backgroundColor: "#101d2a",
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#1f2c34",
+    left: 14,
+    right: 14,
+    top: "10%",
+    backgroundColor: C.card,
+    borderRadius: 20,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  modalHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 6,
   },
   countTxt: { color: C.sub, fontSize: 11, marginBottom: 6, paddingLeft: 4 },
   messageBox: {

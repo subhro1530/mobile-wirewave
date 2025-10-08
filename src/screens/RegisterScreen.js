@@ -59,6 +59,7 @@ export default function RegisterScreen({ navigation }) {
           placeholderTextColor="#999"
           onChangeText={setEmail}
           value={email}
+          selectionColor="#3a7afe"
         />
         <TextInput
           style={styles.input}
@@ -67,6 +68,7 @@ export default function RegisterScreen({ navigation }) {
           secureTextEntry
           onChangeText={setPassword}
           value={password}
+          selectionColor="#3a7afe"
         />
         <TouchableOpacity
           style={styles.actionButton}

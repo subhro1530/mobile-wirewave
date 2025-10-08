@@ -26,6 +26,7 @@ import { useNavigation } from "@react-navigation/native";
 import { TextInput } from "react-native-paper";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+
 // Replace STYLE palette + UI layout
 const PALETTE = {
   brandBar: "#14233a", // deep bg matching icon shadow
@@ -68,6 +69,30 @@ export default function ChatScreen() {
     avatar_url: "",
   }); // form
   const navigation = useNavigation();
+  const debounceRef = useRef(null); // NEW debounce timer
+
+  // === AUTO EMAIL EXISTENCE CHECK (debounced) ===
+  useEffect(() => {
+    if (!newChatVisible) return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    // reset state when typing
+    setNewChatExists(null);
+    if (!newChatEmail.includes("@") || newChatEmail.trim().length < 5) return;
+    debounceRef.current = setTimeout(async () => {
+      setNewChatChecking(true);
+      try {
+        await API.get(
+          `/users/search?email=${encodeURIComponent(newChatEmail.trim())}`
+        );
+        setNewChatExists(true);
+      } catch {
+        setNewChatExists(false);
+      } finally {
+        setNewChatChecking(false);
+      }
+    }, 550);
+    return () => debounceRef.current && clearTimeout(debounceRef.current);
+  }, [newChatEmail, newChatVisible]);
 
   // === Added missing callbacks ===
   const testConnection = useCallback(async () => {
@@ -341,7 +366,7 @@ export default function ChatScreen() {
           </TouchableOpacity>
         </View>
       ) : (
-        <View style={styles.searchBarFancy}>
+        <View style={styles.searchBarSlim}>
           <Icon
             name="search"
             size={18}
@@ -349,17 +374,28 @@ export default function ChatScreen() {
             style={{ marginHorizontal: 10 }}
           />
           <TextInput
-            style={styles.searchFancyInput}
-            placeholder="Search chats"
+            mode="flat"
+            style={styles.searchSlimInput}
+            placeholder="Search chats..."
             placeholderTextColor="#6d7d92"
             value={searchQuery}
             onChangeText={setSearchQuery}
-            autoFocus
+            underlineColor="transparent"
+            textColor="#e9edef"
+            theme={{
+              colors: {
+                primary: "#3a7afe",
+                background: "transparent",
+                surface: "transparent",
+                onSurface: "#e9edef",
+                text: "#e9edef",
+              },
+            }}
           />
           {!!searchQuery && (
             <TouchableOpacity
               onPress={() => setSearchQuery("")}
-              style={{ paddingHorizontal: 10, paddingVertical: 6 }}
+              style={{ paddingHorizontal: 8, paddingVertical: 6 }}
             >
               <Icon name="close" size={18} color="#6d7d92" />
             </TouchableOpacity>
@@ -376,7 +412,7 @@ export default function ChatScreen() {
         </View>
       )}
 
-      {/* Overflow Menu */}
+      {/* Dropdown Menu with Icons */}
       {showMenu && !showSearch && (
         <View style={styles.menu}>
           <TouchableOpacity
@@ -386,6 +422,12 @@ export default function ChatScreen() {
               openProfile(userEmail, false);
             }}
           >
+            <Icon
+              name="person"
+              size={16}
+              color="#3a7afe"
+              style={styles.menuIcon}
+            />
             <Text style={styles.menuTxt}>My Profile</Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -395,6 +437,12 @@ export default function ChatScreen() {
               openProfile(userEmail, true);
             }}
           >
+            <Icon
+              name="edit"
+              size={16}
+              color="#3a7afe"
+              style={styles.menuIcon}
+            />
             <Text style={styles.menuTxt}>Edit My Profile</Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -404,6 +452,12 @@ export default function ChatScreen() {
               testConnection();
             }}
           >
+            <Icon
+              name="wifi-tethering"
+              size={16}
+              color="#3a7afe"
+              style={styles.menuIcon}
+            />
             <Text style={styles.menuTxt}>Test Connection</Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -413,6 +467,12 @@ export default function ChatScreen() {
               deleteAccount();
             }}
           >
+            <Icon
+              name="delete-forever"
+              size={16}
+              color="#ff7777"
+              style={styles.menuIcon}
+            />
             <Text style={[styles.menuTxt, { color: "#ff7777" }]}>
               Delete Account
             </Text>
@@ -424,6 +484,12 @@ export default function ChatScreen() {
               logout?.();
             }}
           >
+            <Icon
+              name="logout"
+              size={16}
+              color="#ff6b6b"
+              style={styles.menuIcon}
+            />
             <Text style={[styles.menuTxt, { color: "#ff6b6b" }]}>Logout</Text>
           </TouchableOpacity>
         </View>
@@ -755,16 +821,10 @@ export default function ChatScreen() {
               )}
             </>
           )}
-          <TouchableOpacity
-            onPress={() => setProfileModalVisible(false)}
-            style={styles.closeModalBtn}
-          >
-            <Text style={{ color: "#3a7afe", fontWeight: "600" }}>Close</Text>
-          </TouchableOpacity>
         </View>
       </Modal>
 
-      {/* New Chat Modal */}
+      {/* New Chat Modal (improved colors & auto-validation info) */}
       <Modal
         transparent
         visible={newChatVisible}
@@ -780,35 +840,16 @@ export default function ChatScreen() {
         <View style={[styles.modalCard, { top: "24%" }]}>
           <Text style={styles.profileEmail}>Start New Chat</Text>
           <Text style={styles.profileMeta}>
-            Enter an email to check availability.
+            Enter an email. User existence auto‑checks.
           </Text>
           <TextInput
             style={styles.broadcastInput}
             placeholder="user@example.com"
-            autoCapitalize="none"
             placeholderTextColor={PALETTE.textSecondary}
             value={newChatEmail}
-            onChangeText={(v) => {
-              setNewChatEmail(v);
-              setNewChatExists(null);
-            }}
-            onSubmitEditing={async () => {
-              if (!newChatEmail.includes("@")) return;
-              setNewChatChecking(true);
-              setNewChatExists(null);
-              try {
-                await API.get(
-                  `/users/search?email=${encodeURIComponent(
-                    newChatEmail.trim()
-                  )}`
-                );
-                setNewChatExists(true);
-              } catch {
-                setNewChatExists(false);
-              } finally {
-                setNewChatChecking(false);
-              }
-            }}
+            autoCapitalize="none"
+            keyboardType="email-address"
+            onChangeText={(v) => setNewChatEmail(v.trim())}
           />
           <View style={{ minHeight: 26, justifyContent: "center" }}>
             {newChatChecking && (
@@ -816,12 +857,12 @@ export default function ChatScreen() {
             )}
             {newChatExists === true && (
               <Text style={{ color: "#33d18e", fontSize: 12 }}>
-                User found. You can start the chat.
+                User found. You can open the chat.
               </Text>
             )}
             {newChatExists === false && (
               <Text style={{ color: "#ff7777", fontSize: 12 }}>
-                No user found with that email.
+                No user with that email.
               </Text>
             )}
           </View>
@@ -831,14 +872,14 @@ export default function ChatScreen() {
               disabled={newChatChecking}
               onPress={() => setNewChatVisible(false)}
             >
-              <Text style={styles.bcBtnCancelTxt}>Close</Text>
+              <Text style={styles.bcBtnCancelTxt}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[
                 styles.bcBtnSend,
-                (!newChatExists || newChatChecking) && { opacity: 0.4 },
+                (newChatExists !== true || newChatChecking) && { opacity: 0.4 },
               ]}
-              disabled={!newChatExists || newChatChecking}
+              disabled={newChatExists !== true || newChatChecking}
               onPress={() => {
                 setNewChatVisible(false);
                 navigation.navigate("ChatWindow", {
@@ -909,25 +950,32 @@ const styles = StyleSheet.create({
     borderColor: "#20344e",
     zIndex: 50,
   },
-  menuItem: { paddingHorizontal: 16, paddingVertical: 10 },
+  menuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  menuIcon: { marginRight: 10 },
   menuTxt: { color: "#e9edef", fontSize: 13 },
-  searchBarFancy: {
+  searchBarSlim: {
     flexDirection: "row",
     alignItems: "center",
     marginHorizontal: 12,
     marginTop: (StatusBar.currentHeight || 0) + 4,
     marginBottom: 6,
-    backgroundColor: "#1b2b3d",
-    borderRadius: 28,
+    backgroundColor: "#1f2c34",
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#24425f",
+    borderColor: "#2a3a48",
+    height: 44,
   },
-  searchFancyInput: {
+  searchSlimInput: {
     flex: 1,
-    color: "#e9edef",
+    backgroundColor: "transparent",
     fontSize: 14,
-    paddingVertical: 6,
-    paddingHorizontal: 0,
+    paddingVertical: 2,
+    color: "#e9edef",
   },
   archivedRow: {
     flexDirection: "row",
@@ -1059,6 +1107,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   broadcastInput: {
+    // enforce white text
     backgroundColor: "#1a2b42",
     marginTop: 12,
     borderRadius: 10,

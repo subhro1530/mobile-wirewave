@@ -19,6 +19,7 @@ import {
   Alert,
   Modal,
   Pressable,
+  Image,
 } from "react-native";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import { AuthContext } from "../AuthContext";
@@ -51,6 +52,7 @@ export default function ChatWindowScreen() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileData, setProfileData] = useState(null);
   const [profileError, setProfileError] = useState(null);
+  const [avatarUrl, setAvatarUrl] = useState(null); // NEW
   const chatRef = useRef(null);
 
   const loadMessages = useCallback(async () => {
@@ -157,6 +159,22 @@ export default function ChatWindowScreen() {
     ]);
   }, [contact, navigation]);
 
+  // Fetch profile early for avatar (silent)
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const { data } = await API.get(
+          `/users/search?email=${encodeURIComponent(contact)}`
+        );
+        if (mounted && data?.avatar_url) setAvatarUrl(data.avatar_url);
+      } catch {}
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [contact]);
+
   return (
     <View style={styles.root}>
       <StatusBar
@@ -173,17 +191,16 @@ export default function ChatWindowScreen() {
           <Icon name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
         <View style={styles.headerAvatar}>
-          <TouchableOpacity
-            style={{ flex: 1, alignItems: "center", justifyContent: "center" }}
-            onPress={() => {
-              // replaced alert with noop or future profile modal trigger
-              // (profile shown via menu already)
-            }}
-          >
+          {avatarUrl ? (
+            <Image
+              source={{ uri: avatarUrl }}
+              style={{ width: 40, height: 40, borderRadius: 20 }}
+            />
+          ) : (
             <Text style={styles.headerAvatarTxt}>
               {contact?.slice(0, 2)?.toUpperCase()}
             </Text>
-          </TouchableOpacity>
+          )}
         </View>
         <View style={{ flex: 1, paddingRight: 8 }}>
           <Text style={styles.contactName} numberOfLines={1}>
@@ -209,33 +226,38 @@ export default function ChatWindowScreen() {
       {menuOpen && (
         <View style={styles.dropdown}>
           <TouchableOpacity
-            style={styles.dropdownItem}
+            style={styles.dropdownItemRow}
             onPress={() => {
               setMenuOpen(false);
               loadProfile();
             }}
           >
+            <Icon
+              name="person"
+              size={16}
+              color="#3a7afe"
+              style={styles.ddIcon}
+            />
             <Text style={styles.dropdownTxt}>View Profile</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.dropdownItem}
+            style={styles.dropdownItemRow}
             onPress={() => {
               setMenuOpen(false);
               deleteChat();
             }}
           >
+            <Icon
+              name="delete-forever"
+              size={16}
+              color="#ff6b6b"
+              style={styles.ddIcon}
+            />
             <Text style={[styles.dropdownTxt, { color: "#ff6b6b" }]}>
               Delete Chat
             </Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.dropdownItem}
-            onPress={() => setMenuOpen(false)}
-          >
-            <Text style={[styles.dropdownTxt, { color: "#8696a0" }]}>
-              Close
-            </Text>
-          </TouchableOpacity>
+          {/* Removed explicit "Close" option (tap menu icon again to close) */}
         </View>
       )}
 
@@ -272,6 +294,7 @@ export default function ChatWindowScreen() {
               value={text}
               onChangeText={setText}
               multiline
+              selectionColor="#3a7afe"
             />
             <TouchableOpacity style={styles.attachBtn}>
               <Icon name="attach-file" size={22} color="#8696a0" />
@@ -431,11 +454,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#1e3547",
   },
-  dropdownItem: {
+  dropdownItem: { paddingHorizontal: 14, paddingVertical: 10 },
+  dropdownItemRow: {
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
-  dropdownTxt: { color: "#fff", fontSize: 13 },
+  ddIcon: { marginRight: 8 },
   modalBackdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0,0,0,0.55)",
