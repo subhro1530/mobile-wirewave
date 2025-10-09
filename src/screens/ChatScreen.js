@@ -60,7 +60,8 @@ export default function ChatScreen() {
   const [newChatExists, setNewChatExists] = useState(null); // true/false/null
   const [archivedChats, setArchivedChats] = useState(new Set()); // new
   const [showArchivedView, setShowArchivedView] = useState(false); // new
-  const [starredChats, setStarredChats] = useState(new Set()); // new
+  const [pinnedChats, setPinnedChats] = useState(new Set()); // RENAMED from starredChats
+  const [showPinnedOnly, setShowPinnedOnly] = useState(false); // RENAMED
   const [chatActionEmail, setChatActionEmail] = useState(null); // long-press target
   const [chatActionVisible, setChatActionVisible] = useState(false); // long-press modal
   const [profileViewingEmail, setProfileViewingEmail] = useState(null); // which profile
@@ -72,20 +73,14 @@ export default function ChatScreen() {
   }); // form
   const [contactAvatars, setContactAvatars] = useState({}); // email -> avatar_url|null
   const [myAvatar, setMyAvatar] = useState(null); // current user avatar
+  const [contactPresence, setContactPresence] = useState({}); // NEW: email -> presence info
   const navigation = useNavigation();
   const debounceRef = useRef(null); // NEW debounce timer
   const [toast, setToast] = useState(null); // { msg, type } type: 'success'|'error'
   const toastTimerRef = useRef(null);
-  const [showStarredOnly, setShowStarredOnly] = useState(false); // NEW state
   const [hasProfile, setHasProfile] = useState(false); // NEW: track if my profile exists
   // NEW: new‑chat found profile (via email or userid)
   const [newChatFound, setNewChatFound] = useState(null); // { user_email, userid, ... } | null
-  // NEW: starred messages modal and cache
-  const [starredModalVisible, setStarredModalVisible] = useState(false);
-  const [starredLoading, setStarredLoading] = useState(false);
-  const [starredMessages, setStarredMessages] = useState([]); // array of starred msg objects
-  const [starredIds, setStarredIds] = useState(new Set()); // Set<number>
-  const [contactPresence, setContactPresence] = useState({}); // NEW: email -> { online, last_seen }
 
   // === AUTO EMAIL EXISTENCE CHECK (debounced) ===
   useEffect(() => {
@@ -227,7 +222,7 @@ export default function ChatScreen() {
           "starredChats",
         ]);
         if (a?.[1]) setArchivedChats(new Set(JSON.parse(a[1])));
-        if (s?.[1]) setStarredChats(new Set(JSON.parse(s[1])));
+        if (s?.[1]) setPinnedChats(new Set(JSON.parse(s[1])));
       } catch {}
     })();
   }, []);
@@ -241,10 +236,10 @@ export default function ChatScreen() {
   }, [archivedChats]);
   useEffect(() => {
     AsyncStorage.setItem(
-      "starredChats",
-      JSON.stringify(Array.from(starredChats))
+      "pinnedChats",
+      JSON.stringify(Array.from(pinnedChats))
     ).catch(() => {});
-  }, [starredChats]);
+  }, [pinnedChats]);
 
   // Derive contacts from messages
   const contacts = React.useMemo(() => {
@@ -272,16 +267,16 @@ export default function ChatScreen() {
         ? archivedChats.has(c.email)
         : !archivedChats.has(c.email)
     );
-    // Star priority
+    // pin priority first
     list.sort((a, b) => {
-      const aStar = starredChats.has(a.email);
-      const bStar = starredChats.has(b.email);
-      if (aStar && !bStar) return -1;
-      if (bStar && !aStar) return 1;
+      const aPin = pinnedChats.has(a.email);
+      const bPin = pinnedChats.has(b.email);
+      if (aPin && !bPin) return -1;
+      if (bPin && !aPin) return 1;
       return new Date(b.lastMessageTime) - new Date(a.lastMessageTime);
     });
     return list;
-  }, [messages, userEmail, archivedChats, showArchivedView, starredChats]);
+  }, [messages, userEmail, archivedChats, showArchivedView, pinnedChats]);
 
   // Filter contacts by search
   const filtered = contacts
@@ -290,7 +285,7 @@ export default function ChatScreen() {
         c.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (c.lastMessage || "").toLowerCase().includes(searchQuery.toLowerCase())
     )
-    .filter((c) => (!showStarredOnly ? true : starredChats.has(c.email)));
+    .filter((c) => (!showPinnedOnly ? true : pinnedChats.has(c.email)));
 
   // Unified profile open
   const openProfile = useCallback(
@@ -429,8 +424,8 @@ export default function ChatScreen() {
     });
     setChatActionVisible(false);
   }, []);
-  const toggleStar = useCallback((email) => {
-    setStarredChats((prev) => {
+  const togglePinChat = useCallback((email) => {
+    setPinnedChats((prev) => {
       const next = new Set(prev);
       next.has(email) ? next.delete(email) : next.add(email);
       return next;
@@ -457,7 +452,7 @@ export default function ChatScreen() {
           next.delete(email);
           return next;
         });
-        setStarredChats((prev) => {
+        setPinnedChats((prev) => {
           const next = new Set(prev);
           next.delete(email);
           return next;
@@ -525,44 +520,6 @@ export default function ChatScreen() {
     setToast({ msg, type });
     toastTimerRef.current = setTimeout(() => setToast(null), duration);
   }, []);
-
-  // Starred messages helpers
-  const loadStarred = useCallback(async () => {
-    try {
-      setStarredLoading(true);
-      const { data } = await API.get("/messages/starred", { headers: authHdr }); // CHANGED
-      const list = Array.isArray(data) ? data : [];
-      setStarredMessages(list);
-      setStarredIds(new Set(list.map((m) => m.id)));
-    } catch {
-      // silent
-    } finally {
-      setStarredLoading(false);
-    }
-  }, [authHdr]); // CHANGED dep
-
-  const toggleStarMessage = useCallback(
-    async (messageId, shouldStar) => {
-      try {
-        await API.post(
-          `/messages/${encodeURIComponent(messageId)}/star`,
-          { action: shouldStar ? "add" : "remove" },
-          { headers: authHdr } // CHANGED
-        );
-        setStarredIds((prev) => {
-          const next = new Set(prev);
-          if (shouldStar) next.add(messageId);
-          else next.delete(messageId);
-          return next;
-        });
-        if (starredModalVisible) await loadStarred();
-        showToast(shouldStar ? "Message starred" : "Removed from starred");
-      } catch (e) {
-        showToast(e?.message || "Star action failed", "error");
-      }
-    },
-    [loadStarred, starredModalVisible, showToast, authHdr] // CHANGED dep
-  );
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: PALETTE.bg }]}>
@@ -712,48 +669,32 @@ export default function ChatScreen() {
             style={styles.menuItem}
             onPress={() => {
               setShowMenu(false);
-              setShowStarredOnly((v) => !v);
+              setShowPinnedOnly((v) => !v);
             }}
           >
             <Icon
-              name={showStarredOnly ? "star-outline" : "star"}
+              name={showPinnedOnly ? "push-pin" : "push-pin"}
               size={16}
               color="#ffc94d"
               style={styles.menuIcon}
             />
             <Text style={styles.menuTxt}>
-              {showStarredOnly ? "All Chats" : "Starred Chats"}
+              {showPinnedOnly ? "All Chats" : "Pinned Chats"}
             </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={async () => {
-              setShowMenu(false);
-              await loadStarred();
-              setStarredModalVisible(true);
-            }}
-          >
-            <Icon
-              name="star"
-              size={16}
-              color="#ffc94d"
-              style={styles.menuIcon}
-            />
-            <Text style={styles.menuTxt}>Starred Messages</Text>
           </TouchableOpacity>
         </View>
       )}
 
       {/* Chats List */}
-      {showStarredOnly && (
+      {showPinnedOnly && (
         <View style={styles.starredBanner}>
           <Icon
-            name="star"
+            name="push-pin"
             size={14}
             color="#ffc94d"
             style={{ marginRight: 6 }}
           />
-          <Text style={styles.starredBannerTxt}>Showing starred chats</Text>
+          <Text style={styles.starredBannerTxt}>Showing pinned chats</Text>
         </View>
       )}
       <FlatList
@@ -802,7 +743,7 @@ export default function ChatScreen() {
               m.receiver_email === userEmail &&
               !m.read
           ).length;
-          const starred = starredChats.has(item.email);
+          const pinned = pinnedChats.has(item.email); // RENAMED
           const avatar = contactAvatars[item.email];
           const pres = contactPresence[item.email];
           const winMs = (pres?.window_seconds ?? 60) * 1000;
@@ -844,9 +785,9 @@ export default function ChatScreen() {
                   </Text>
                   {isOnline && <View style={styles.onlineDot} />}
                   <View style={{ flexDirection: "row", alignItems: "center" }}>
-                    {starred && (
+                    {pinned && (
                       <Icon
-                        name="star"
+                        name="push-pin"
                         size={14}
                         color={PALETTE.brandAccent}
                         style={{ marginRight: 4 }}
@@ -928,16 +869,16 @@ export default function ChatScreen() {
           <Text style={styles.sheetTitle}>{chatActionEmail}</Text>
           <TouchableOpacity
             style={styles.sheetBtn}
-            onPress={() => toggleStar(chatActionEmail)}
+            onPress={() => togglePinChat(chatActionEmail)}
           >
             <Icon
-              name={starredChats.has(chatActionEmail) ? "star" : "star-border"}
+              name={pinnedChats.has(chatActionEmail) ? "push-pin" : "push-pin"}
               size={16}
               color="#ffd54f"
               style={{ marginRight: 8 }}
             />
             <Text style={styles.sheetBtnTxt}>
-              {starredChats.has(chatActionEmail) ? "Unstar" : "Star"}
+              {pinnedChats.has(chatActionEmail) ? "Unpin" : "Pin"}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -984,33 +925,6 @@ export default function ChatScreen() {
             <Text style={[styles.sheetBtnTxt, { color: "#ff6666" }]}>
               Delete Chat
             </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.sheetBtn}
-            onPress={() => {
-              const conv = messages.filter(
-                (m) =>
-                  (m.sender_email === userEmail &&
-                    m.receiver_email === chatActionEmail) ||
-                  (m.receiver_email === userEmail &&
-                    m.sender_email === chatActionEmail)
-              );
-              if (!conv.length) return;
-              const latest = conv.reduce((a, b) =>
-                new Date(a.sent_at) > new Date(b.sent_at) ? a : b
-              );
-              const isStarred = starredIds.has(latest.id);
-              toggleStarMessage(latest.id, !isStarred);
-              setChatActionVisible(false);
-            }}
-          >
-            <Icon
-              name="grade"
-              size={16}
-              color="#ffd54f"
-              style={{ marginRight: 8 }}
-            />
-            <Text style={styles.sheetBtnTxt}>Star/Unstar latest message</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.sheetBtn, { justifyContent: "center" }]}
@@ -1241,67 +1155,6 @@ export default function ChatScreen() {
               <Text style={styles.bcBtnSendTxt}>Open Chat</Text>
             </TouchableOpacity>
           </View>
-        </View>
-      </Modal>
-
-      {/* Starred Messages Modal */}
-      <Modal
-        transparent
-        visible={starredModalVisible}
-        animationType="fade"
-        onRequestClose={() => setStarredModalVisible(false)}
-      >
-        <Pressable
-          style={styles.modalBackdrop}
-          onPress={() => setStarredModalVisible(false)}
-        >
-          <View />
-        </Pressable>
-        <View style={[styles.modalCard, { top: "18%", maxHeight: "70%" }]}>
-          <Text style={styles.profileEmail}>Starred Messages</Text>
-          {starredLoading ? (
-            <ActivityIndicator color="#3a7afe" style={{ marginTop: 10 }} />
-          ) : starredMessages.length === 0 ? (
-            <Text style={{ color: "#9aa8b3", marginTop: 10, fontSize: 12 }}>
-              No starred messages.
-            </Text>
-          ) : (
-            <FlatList
-              data={starredMessages.sort(
-                (a, b) =>
-                  new Date(b.starred_at || b.sent_at) -
-                  new Date(a.starred_at || a.sent_at)
-              )}
-              keyExtractor={(it) => String(it.id)}
-              style={{ marginTop: 10 }}
-              contentContainerStyle={{ paddingBottom: 10 }}
-              renderItem={({ item }) => (
-                <View style={styles.starRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.starContent} numberOfLines={2}>
-                      {item.content}
-                    </Text>
-                    <Text style={styles.starMeta}>
-                      {item.sender_email}
-                      {item.sender_userid ? ` (@${item.sender_userid})` : ""}
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.unstarBtn}
-                    onPress={() => toggleStarMessage(item.id, false)}
-                  >
-                    <Icon name="star" size={16} color="#ffc94d" />
-                  </TouchableOpacity>
-                </View>
-              )}
-            />
-          )}
-          <TouchableOpacity
-            onPress={() => setStarredModalVisible(false)}
-            style={{ alignSelf: "flex-end", marginTop: 10 }}
-          >
-            <Text style={{ color: "#3a7afe", fontWeight: "600" }}>Close</Text>
-          </TouchableOpacity>
         </View>
       </Modal>
 
@@ -1706,6 +1559,8 @@ const styles = StyleSheet.create({
     borderColor: "#7d3a3a",
   },
   toastTxt: { color: "#fff", fontSize: 13, flexShrink: 1 },
+
+  // REPLACED broken/duplicated block with a single valid set
   starredBanner: {
     flexDirection: "row",
     alignItems: "center",

@@ -26,6 +26,7 @@ import { AuthContext } from "../AuthContext";
 import API from "../api";
 import Icon from "react-native-vector-icons/MaterialIcons";
 import ChatWindow from "../components/ChatWindow";
+import * as Clipboard from "expo-clipboard"; // NEW
 
 const COLORS = {
   bar: "#14233a",
@@ -63,6 +64,9 @@ export default function ChatWindowScreen() {
     : undefined;
   const [enhancing, setEnhancing] = useState(false); // NEW
   const [kbVisible, setKbVisible] = useState(false); // NEW
+  const [starredIds, setStarredIds] = useState(new Set()); // NEW: cache starred messages
+  const [msgActionVisible, setMsgActionVisible] = useState(false); // NEW
+  const [targetMsg, setTargetMsg] = useState(null); // NEW
 
   const loadMessages = useCallback(async () => {
     try {
@@ -529,6 +533,62 @@ export default function ChatWindowScreen() {
     }
   }, [text, enhancing, authHdr, showToast]);
 
+  // Load starred list once for quick toggle state
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await API.get("/messages/starred", { headers: authHdr });
+        if (!cancelled) {
+          const ids = new Set((Array.isArray(data) ? data : []).map((m) => m.id));
+          setStarredIds(ids);
+        }
+      } catch {}
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authHdr]); // NEW
+
+  // Long-press hook from ChatWindow
+  const onLongPressMessage = useCallback((m) => {
+    setTargetMsg(m);
+    setMsgActionVisible(true);
+  }, []); // NEW
+
+  const toggleStarMessage = useCallback(async () => {
+    if (!targetMsg?.id) return;
+    const isStarred = starredIds.has(targetMsg.id);
+    try {
+      await API.post(
+        `/messages/${encodeURIComponent(targetMsg.id)}/star`,
+        { action: isStarred ? "remove" : "add" },
+        { headers: authHdr }
+      );
+      setStarredIds((prev) => {
+        const next = new Set(prev);
+        if (isStarred) next.delete(targetMsg.id);
+        else next.add(targetMsg.id);
+        return next;
+      });
+      setMsgActionVisible(false);
+      showToast(isStarred ? "Unstarred message" : "Starred message");
+    } catch (e) {
+      showToast(e?.response?.data?.error || e?.message || "Action failed", "error");
+    }
+  }, [targetMsg, starredIds, authHdr, showToast]); // NEW
+
+  const copyMessage = useCallback(async () => {
+    if (!targetMsg?.content) return;
+    try {
+      await Clipboard.setStringAsync(targetMsg.content);
+      setMsgActionVisible(false);
+      showToast("Copied to clipboard");
+    } catch {
+      showToast("Copy failed", "error");
+    }
+  }, [targetMsg, showToast]); // NEW
+
   return (
     <View style={styles.root}>
       {/* Outside overlay for dropdown */}
@@ -635,6 +695,7 @@ export default function ChatWindowScreen() {
           onRefresh={loadMessages}
           onClear={() => {}}
           bottomInset={emojiVisible && !kbVisible ? 320 : kbVisible ? 0 : 70} // CHANGED: avoid double raise when keyboard open
+          onLongPressMessage={onLongPressMessage} // NEW
         />
 
         {/* Composer */}
@@ -745,6 +806,47 @@ export default function ChatWindowScreen() {
           </View>
         </Modal>
       </KeyboardAvoidingView>
+
+      {/* Message action modal */}
+      <Modal
+        transparent
+        visible={msgActionVisible}
+        animationType="fade"
+        onRequestClose={() => setMsgActionVisible(false)}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setMsgActionVisible(false)}
+        >
+          <View />
+        </Pressable>
+        <View style={[styles.actionSheet, { bottom: 30 }]}>
+          <Text style={styles.sheetTitle} numberOfLines={2}>
+            {targetMsg?.content || ""}
+          </Text>
+          <TouchableOpacity style={styles.sheetBtn} onPress={toggleStarMessage}>
+            <Icon
+              name={starredIds.has(targetMsg?.id) ? "grade" : "star-border"}
+              size={16}
+              color="#ffd54f"
+              style={{ marginRight: 8 }}
+            />
+            <Text style={styles.sheetBtnTxt}>
+              {starredIds.has(targetMsg?.id) ? "Unstar Message" : "Star Message"}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.sheetBtn} onPress={copyMessage}>
+            <Icon name="content-copy" size={16} color="#9ab1c1" style={{ marginRight: 8 }} />
+            <Text style={styles.sheetBtnTxt}>Copy</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.sheetBtn, { justifyContent: "center" }]}
+            onPress={() => setMsgActionVisible(false)}
+          >
+            <Text style={[styles.sheetBtnTxt, { color: "#8696a0" }]}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
 
       {/* Profile Modal */}
       <Modal
@@ -1104,4 +1206,40 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   shareLabel: { color: "#e9edef", fontSize: 11, textAlign: "center" },
+  actionSheet: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "#142332",
+    paddingTop: 18,
+    paddingBottom: 28,
+    paddingHorizontal: 18,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderWidth: 1,
+    borderColor: "#21384c",
+  },
+  sheetTitle: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  sheetBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    marginBottom: 12,
+    backgroundColor: "#1f2c34",
+  },
+  sheetBtnTxt: {
+    color: "#e9edef",
+    fontSize: 14,
+    flex: 1,
+    textAlign: "center",
+  },
 });

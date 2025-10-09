@@ -59,6 +59,7 @@ export default forwardRef(function ChatWindow(
     selectedIds = new Set(),
     onToggleSelectMessage,
     onStartSelection,
+    onLongPressMessage, // NEW
   },
   ref
 ) {
@@ -143,11 +144,11 @@ export default forwardRef(function ChatWindow(
                 <TouchableOpacity
                   key={m.id}
                   activeOpacity={selectionMode ? 0.8 : 1}
-                  onLongPress={() =>
-                    selectionMode
-                      ? onToggleSelectMessage?.(m.id)
-                      : onStartSelection?.(m.id)
-                  }
+                  onLongPress={() => {
+                    if (selectionMode) onToggleSelectMessage?.(m.id);
+                    else if (onLongPressMessage) onLongPressMessage(m); // NEW
+                    else onStartSelection?.(m.id);
+                  }}
                   delayLongPress={280}
                   onPress={() =>
                     selectionMode ? onToggleSelectMessage?.(m.id) : undefined
