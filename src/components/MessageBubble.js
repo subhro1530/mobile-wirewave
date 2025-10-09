@@ -11,7 +11,67 @@ const COLORS = {
   readTick: "#6ad1ff",
   sentTick: "#5f7594",
   selectedBorder: "#3a7afe",
+  clickable: "#66d38a", // NEW: light green for clickable parts
 };
+
+// NEW: render message content with highlighted clickable parts
+function renderHighlightedText(text) {
+  const src = String(text || "");
+  if (!src) return src;
+
+  const patterns = [
+    { type: "url", re: /(https?:\/\/[^\s]+|www\.[^\s]+)/gi },
+    { type: "email", re: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi },
+    { type: "phone", re: /(\+?\d[\d\s\-().]{6,}\d)/g },
+  ];
+
+  // collect matches with start/end to avoid overlaps
+  const all = [];
+  patterns.forEach(({ type, re }) => {
+    let m;
+    while ((m = re.exec(src)) !== null) {
+      all.push({ start: m.index, end: m.index + m[0].length, type });
+    }
+  });
+  all.sort((a, b) => a.start - b.start);
+
+  // filter overlaps (keep earliest)
+  const kept = [];
+  let lastEnd = -1;
+  for (const seg of all) {
+    if (seg.start >= lastEnd) {
+      kept.push(seg);
+      lastEnd = seg.end;
+    }
+  }
+
+  // build parts
+  const parts = [];
+  let idx = 0;
+  kept.forEach((seg, i) => {
+    if (seg.start > idx) {
+      parts.push(
+        <Text key={`t_${i}_n`} style={styles.text}>
+          {src.slice(idx, seg.start)}
+        </Text>
+      );
+    }
+    parts.push(
+      <Text key={`t_${i}_c`} style={[styles.text, styles.clickable]}>
+        {src.slice(seg.start, seg.end)}
+      </Text>
+    );
+    idx = seg.end;
+  });
+  if (idx < src.length) {
+    parts.push(
+      <Text key={`t_tail`} style={styles.text}>
+        {src.slice(idx)}
+      </Text>
+    );
+  }
+  return parts;
+}
 
 export default function MessageBubble({
   message,
@@ -44,7 +104,10 @@ export default function MessageBubble({
           ]}
         >
           {isBroadcast && <Text style={styles.broadcastTag}>BROADCAST</Text>}
-          <Text style={styles.text}>{message.content}</Text>
+          {/* CHANGED: highlighted content */}
+          <Text style={styles.text}>
+            {renderHighlightedText(message.content)}
+          </Text>
           <View style={styles.metaRow}>
             <Text style={styles.time}>
               {new Date(message.sent_at).toLocaleTimeString([], {
@@ -90,6 +153,8 @@ const styles = StyleSheet.create({
   bubbleMine: { backgroundColor: COLORS.mine, borderTopRightRadius: 8 }, // soften
   bubbleOther: { backgroundColor: COLORS.other, borderTopLeftRadius: 8 },
   text: { color: COLORS.text, fontSize: 14, lineHeight: 18 },
+  // NEW: clickable token style
+  clickable: { color: COLORS.clickable, fontWeight: "600" },
   time: {
     fontSize: 10,
     color: COLORS.time,
