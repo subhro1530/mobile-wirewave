@@ -27,6 +27,7 @@ import API from "../api";
 import Icon from "react-native-vector-icons/MaterialIcons";
 import ChatWindow from "../components/ChatWindow";
 import * as Clipboard from "expo-clipboard"; // NEW
+import * as Location from "expo-location"; // NEW
 
 const COLORS = {
   bar: "#14233a",
@@ -538,64 +539,40 @@ export default function ChatWindowScreen() {
     if (locSending || !contact) return;
     setLocSending(true);
     try {
-      let coords = null;
-
-      // Try expo-location if available
-      try {
-        const Location = await import("expo-location");
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status === "granted") {
-          const pos = await Location.getCurrentPositionAsync({});
-          coords = {
-            latitude: pos.coords.latitude,
-            longitude: pos.coords.longitude,
-          };
-        }
-      } catch {
-        // Fallback to navigator.geolocation
-      }
-
-      if (!coords && global?.navigator?.geolocation) {
-        await new Promise((resolve) => {
-          navigator.geolocation.getCurrentPosition(
-            (pos) => {
-              coords = {
-                latitude: pos.coords.latitude,
-                longitude: pos.coords.longitude,
-              };
-              resolve();
-            },
-            () => resolve(),
-            { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
-          );
-        });
-      }
-
-      if (!coords) {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
         Alert.alert(
           "Location",
-          "Unable to get your location. Please enable location permissions."
+          "Permission denied. Please enable location permissions in settings."
         );
         return;
       }
-
-      const url = `https://www.google.com/maps/search/?api=1&query=${coords.latitude},${coords.longitude}`;
+      const pos = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
+      const { latitude, longitude } = pos.coords || {};
+      if (typeof latitude !== "number" || typeof longitude !== "number") {
+        Alert.alert("Location", "Could not read coordinates.");
+        return;
+      }
+      const url = `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
       const content = `📍 My location: ${url}`;
       const { data: created } = await API.post(
         "/messages",
         { receiver_email: contact, content },
         { headers: authHdr }
       );
-      if (created && created.id) setAllMessages((prev) => [...prev, created]);
+      if (created && created.id) {
+        setAllMessages((prev) => [...prev, created]);
+      }
       setShareVisible(false);
-      showToast("Location shared");
       setTimeout(() => chatRef.current?.scrollToBottom?.(), 60);
     } catch (e) {
       Alert.alert("Error", e?.message || "Failed to share location");
     } finally {
       setLocSending(false);
     }
-  }, [locSending, contact, authHdr, showToast]); // NEW
+  }, [locSending, contact, authHdr]);
 
   // Derive the "last seen" text from presence (online/last_seen)
   const lastSeenText = (() => {
@@ -865,10 +842,10 @@ export default function ChatWindowScreen() {
               }
             />
             <ShareItem
-              label="Location"
+              label={locSending ? "Sharing..." : "Location"} // CHANGED
               color="#17a884"
               icon="place"
-              onPress={shareLocation} // CHANGED
+              onPress={shareLocation}
             />
             <ShareItem
               label="Contact"
@@ -887,6 +864,18 @@ export default function ChatWindowScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* NEW: inline loading overlay while sharing location */}
+      {locSending && (
+        <View style={[styles.toastWrap, styles.locToast]}>
+          <ActivityIndicator
+            color="#fff"
+            size="small"
+            style={{ marginRight: 8 }}
+          />
+          <Text style={styles.toastTxt}>Sharing location…</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -1174,5 +1163,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     flex: 1,
     textAlign: "center",
+  },
+  locToast: {
+    // subtle variant, matching existing toasts
+    backgroundColor: "#1d3d55",
+    borderWidth: 1,
+    borderColor: "#2d5773",
   },
 });

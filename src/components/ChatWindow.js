@@ -13,6 +13,7 @@ import {
   StyleSheet,
   Image,
   TouchableOpacity,
+  Linking,
 } from "react-native";
 import MessageBubble from "./MessageBubble";
 
@@ -141,19 +142,42 @@ export default forwardRef(function ChatWindow(
                 typeof activeContact === "string" &&
                 activeContact.startsWith("group:");
               const isMe = m.sender_email === currentUserEmail;
+              const onPressSmart = () => {
+                if (selectionMode) {
+                  onToggleSelectMessage?.(m.id);
+                  return;
+                }
+                const t = (m.content || "").toString();
+                const urlRe = /(https?:\/\/[^\s]+|www\.[^\s]+)/i;
+                const emailRe = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
+                const phoneRe = /(\+?\d[\d\s\-().]{6,}\d)/;
+                let target = null;
+                const urlMatch = t.match(urlRe);
+                const emailMatch = t.match(emailRe);
+                const phoneMatch = t.match(phoneRe);
+                if (urlMatch) {
+                  const raw = urlMatch[0];
+                  target = raw.startsWith("http") ? raw : `https://${raw}`;
+                } else if (emailMatch) {
+                  target = `mailto:${emailMatch[0]}`;
+                } else if (phoneMatch) {
+                  const num = phoneMatch[0].replace(/[^\d+]/g, "");
+                  target = `tel:${num}`;
+                }
+                if (target) Linking.openURL(target).catch(() => {});
+              };
+
               return (
                 <TouchableOpacity
                   key={m.id}
                   activeOpacity={selectionMode ? 0.8 : 1}
                   onLongPress={() => {
                     if (selectionMode) onToggleSelectMessage?.(m.id);
-                    else if (onLongPressMessage) onLongPressMessage(m); // NEW
+                    else if (onLongPressMessage) onLongPressMessage(m);
                     else onStartSelection?.(m.id);
                   }}
                   delayLongPress={280}
-                  onPress={() =>
-                    selectionMode ? onToggleSelectMessage?.(m.id) : undefined
-                  }
+                  onPress={onPressSmart} // CHANGED
                 >
                   {/* Sender label for group chats (WhatsApp-like) */}
                   {isGroup && !isMe && (
