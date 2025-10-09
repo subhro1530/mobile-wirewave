@@ -35,7 +35,7 @@ const C = {
 };
 
 export default function CommunitiesScreen() {
-  const { userEmail } = useContext(AuthContext);
+  const { userEmail, userToken } = useContext(AuthContext); // include token
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
@@ -46,17 +46,21 @@ export default function CommunitiesScreen() {
   const [broadcastVisible, setBroadcastVisible] = useState(false); // NEW (replaces always-on UI)
   const [lastBroadcastInfo, setLastBroadcastInfo] = useState(null); // { at: Date, count: number }
 
+  const authHdr = userToken
+    ? { Authorization: `Bearer ${userToken}` }
+    : undefined;
+
   const loadMessages = useCallback(async () => {
     try {
       setLoading(true);
-      const { data } = await API.get("/messages");
+      const { data } = await API.get("/messages", { headers: authHdr });
       setMessages(data || []);
     } catch {
       /* ignore */
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [authHdr]);
 
   useEffect(() => {
     loadMessages();
@@ -107,21 +111,23 @@ export default function CommunitiesScreen() {
       Alert.alert("Missing", "Select at least one recipient.");
       return;
     }
-    // Custom message logic (ignore empty -> fallback)
     const userTyped = content.trim();
-    const finalContent = `📢 ${userTyped || "Broadcast message sent"}`; // changed prefix
+    const finalContent = `📢 ${userTyped || "Broadcast message sent"}`;
     setSending(true);
     try {
-      await API.post("/messages/multi", {
-        receiver_emails: emails,
-        content: finalContent,
-      });
-      // inline success note instead of Alert
+      await API.post(
+        "/messages/multi",
+        { receiver_emails: emails, content: finalContent },
+        { headers: authHdr }
+      );
       setLastBroadcastInfo({ at: Date.now(), count: emails.length });
       setContent("");
       setSelected(new Set());
     } catch (e) {
-      Alert.alert("Error", e.message);
+      Alert.alert(
+        "Error",
+        e?.response?.data?.error || e.message || "Failed to send"
+      );
     } finally {
       setSending(false);
     }
@@ -282,7 +288,7 @@ export default function CommunitiesScreen() {
               {sending ? (
                 <ActivityIndicator color="#fff" size="small" />
               ) : (
-                <Icon name="campaign" size={20} color="#fff" /> 
+                <Icon name="campaign" size={20} color="#fff" />
               )}
             </TouchableOpacity>
           </View>

@@ -40,7 +40,8 @@ const PALETTE = {
 };
 
 export default function ChatScreen() {
-  const { userEmail, logout } = useContext(AuthContext);
+  const { userEmail, logout, userToken } = useContext(AuthContext); // ADDED userToken
+  const authHdr = userToken ? { Authorization: `Bearer ${userToken}` } : undefined; // ADDED
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -75,6 +76,14 @@ export default function ChatScreen() {
   const toastTimerRef = useRef(null);
   const [showStarredOnly, setShowStarredOnly] = useState(false); // NEW state
   const [hasProfile, setHasProfile] = useState(false); // NEW: track if my profile exists
+  // NEW: new‑chat found profile (via email or userid)
+  const [newChatFound, setNewChatFound] = useState(null); // { user_email, userid, ... } | null
+  // NEW: starred messages modal and cache
+  const [starredModalVisible, setStarredModalVisible] = useState(false);
+  const [starredLoading, setStarredLoading] = useState(false);
+  const [starredMessages, setStarredMessages] = useState([]); // array of starred msg objects
+  const [starredIds, setStarredIds] = useState(new Set()); // Set<number>
+  const [contactPresence, setContactPresence] = useState({}); // NEW: email -> { online, last_seen }
 
   // === AUTO EMAIL EXISTENCE CHECK (debounced) ===
   useEffect(() => {
@@ -82,27 +91,42 @@ export default function ChatScreen() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     // reset state when typing
     setNewChatExists(null);
-    if (!newChatEmail.includes("@") || newChatEmail.trim().length < 5) return;
+    setNewChatFound(null);
+    const input = newChatEmail.trim();
+    if (input.length < 3) return;
     debounceRef.current = setTimeout(async () => {
       setNewChatChecking(true);
       try {
-        await API.get(
-          `/users/search?email=${encodeURIComponent(newChatEmail.trim())}`
-        );
+        const isEmail = input.includes("@");
+        const url = isEmail
+          ? `/users/search?email=${encodeURIComponent(input)}`
+          : `/users/search?userid=${encodeURIComponent(input)}`;
+        const { data } = await API.get(url, { headers: authHdr }); // CHANGED add headers
+        // Normalize to always have user_email if available
+        const normalized = {
+          user_email: data?.user_email || (isEmail ? input : null),
+          userid: data?.userid || (!isEmail ? input : null),
+          name: data?.name ?? null,
+          about: data?.about ?? null,
+          avatar_url: data?.avatar_url ?? null,
+        };
+        if (!normalized.user_email) throw new Error("No email returned");
+        setNewChatFound(normalized);
         setNewChatExists(true);
       } catch {
         setNewChatExists(false);
+        setNewChatFound(null);
       } finally {
         setNewChatChecking(false);
       }
     }, 550);
     return () => debounceRef.current && clearTimeout(debounceRef.current);
-  }, [newChatEmail, newChatVisible]);
+  }, [newChatEmail, newChatVisible, authHdr]); // CHANGED dep
 
   // === Added missing callbacks ===
   const testConnection = useCallback(async () => {
     try {
-      const { data } = await API.get("/testdb");
+      const { data } = await API.get("/testdb", { headers: authHdr }); // CHANGED
       showToast(
         data?.status ? `Server: ${data.status}` : "Server OK",
         "success"
@@ -110,7 +134,7 @@ export default function ChatScreen() {
     } catch (e) {
       showToast(e.message || "Connection Failed", "error");
     }
-  }, [showToast]);
+  }, [showToast, authHdr]);
 
   const deleteAccount = useCallback(() => {
     Alert.alert("Delete Account", "This cannot be undone. Continue?", [
@@ -120,7 +144,7 @@ export default function ChatScreen() {
         style: "destructive",
         onPress: async () => {
           try {
-            await API.delete("/account");
+            await API.delete("/account", { headers: authHdr }); // CHANGED
             showToast("Account deleted", "success");
             logout?.();
           } catch (e) {
@@ -129,25 +153,68 @@ export default function ChatScreen() {
         },
       },
     ]);
-  }, [logout, showToast]);
+  }, [logout, showToast, authHdr]);
 
-  // Load messages
+  // Messages loader (no pagination for now)
   const loadMessages = useCallback(async () => {
     if (!userEmail) return;
     try {
       setError(null);
-      const res = await API.get("/messages");
+      const res = await API.get("/messages", { headers: authHdr }); // already added headers
       setMessages(res.data || []);
     } catch (e) {
       setError(e?.message || "Failed to load");
     }
-  }, [userEmail]);
+  }, [userEmail, authHdr]);
 
+  // NEW: start polling messages (fixes missing updates on ChatScreen)
   useEffect(() => {
     loadMessages();
-    const interval = setInterval(loadMessages, 4000);
-    return () => clearInterval(interval);
+    const i = setInterval(loadMessages, 4000);
+    return () => clearInterval(i);
   }, [loadMessages]);
+
+  // NEW: presence ping for current user
+  useEffect(() => {
+    let t;
+    const ping = async () => {
+      try {
+        await API.post("/presence/ping", {}, { headers: authHdr });
+      } catch {}
+    };
+    ping();
+    t = setInterval(ping, 30000);
+    return () => clearInterval(t);
+  }, [authHdr]);
+
+  // NEW: presence lookup for visible contacts
+  useEffect(() => {
+    if (!contacts.length) return;
+    let cancelled = false;
+
+    const fetchPresence = async () => {
+      for (const c of contacts) {
+        try {
+          const { data } = await API.get(
+            `/presence/${encodeURIComponent(c.email)}`,
+            { headers: authHdr }
+          );
+          if (!cancelled) {
+            setContactPresence((prev) => ({ ...prev, [c.email]: data || {} }));
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+
+    fetchPresence();
+    const timer = setInterval(fetchPresence, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [contacts, authHdr]);
 
   // Load archived & starred sets
   useEffect(() => {
@@ -234,8 +301,7 @@ export default function ChatScreen() {
       setProfileEditMode(false);
       try {
         if (email === userEmail) {
-          // GET /profile returns user_email
-          const { data } = await API.get("/profile");
+          const { data } = await API.get("/profile", { headers: authHdr }); // CHANGED
           const myEmail = data?.user_email || data?.email || userEmail;
           setHasProfile(true);
           setProfileData({ ...data, user_email: myEmail });
@@ -244,21 +310,20 @@ export default function ChatScreen() {
             about: data?.about || "",
             avatar_url: data?.avatar_url || "",
           });
-          // fetch userid so username is shown even if /profile lacks it
           try {
             const { data: u } = await API.get(
-              `/users/search?email=${encodeURIComponent(myEmail)}`
+              `/users/search?email=${encodeURIComponent(myEmail)}`,
+              { headers: authHdr } // CHANGED
             );
             if (u?.userid) {
               setProfileData((prev) => ({ ...(prev || {}), userid: u.userid }));
             }
           } catch {}
         } else {
-          // Others via email (returns userid + profile fields or nulls)
           const { data } = await API.get(
-            `/users/search?email=${encodeURIComponent(email)}`
+            `/users/search?email=${encodeURIComponent(email)}`,
+            { headers: authHdr } // CHANGED
           );
-          // ensure we always show at least email
           setProfileData(
             data &&
               (data.user_email ||
@@ -276,14 +341,12 @@ export default function ChatScreen() {
         }
       } catch (e) {
         if (email === userEmail && e?.response?.status === 404) {
-          // No profile yet: allow creation (POST)
           setHasProfile(false);
           setProfileData(null);
           setProfileForm({ name: "", about: "", avatar_url: "" });
           setProfileEditMode(true);
           setProfileError(null);
         } else if (e?.response?.status === 404) {
-          // Other user not found: show minimal with email
           setProfileData({ user_email: email });
           setProfileError(null);
         } else {
@@ -298,7 +361,7 @@ export default function ChatScreen() {
         setProfileLoading(false);
       }
     },
-    [userEmail]
+    [userEmail, authHdr] // CHANGED dep
   );
 
   // Override old openProfileModal (for menu "My Profile")
@@ -321,12 +384,10 @@ export default function ChatScreen() {
         about: profileForm.about.trim(),
         avatar_url: profileForm.avatar_url.trim(),
       };
-      // Create if none, otherwise update
       const method = hasProfile ? "put" : "post";
-      await API[method]("/profile", payload);
+      await API[method]("/profile", payload, { headers: authHdr }); // CHANGED
 
-      // Refresh with GET /profile
-      const { data: fresh } = await API.get("/profile");
+      const { data: fresh } = await API.get("/profile", { headers: authHdr }); // CHANGED
       setHasProfile(true);
       setProfileData(fresh);
       setProfileForm({
@@ -348,7 +409,14 @@ export default function ChatScreen() {
     } finally {
       setProfileLoading(false);
     }
-  }, [profileViewingEmail, userEmail, profileForm, hasProfile, showToast]);
+  }, [
+    profileViewingEmail,
+    userEmail,
+    profileForm,
+    hasProfile,
+    showToast,
+    authHdr,
+  ]); // CHANGED dep
 
   // Chat actions
   const toggleArchive = useCallback((email) => {
@@ -370,7 +438,9 @@ export default function ChatScreen() {
   const deleteChat = useCallback(
     async (email) => {
       try {
-        await API.delete(`/messages/${encodeURIComponent(email)}`);
+        await API.delete(`/messages/${encodeURIComponent(email)}`, {
+          headers: authHdr,
+        }); // CHANGED
         setMessages((prev) =>
           prev.filter(
             (m) =>
@@ -396,7 +466,7 @@ export default function ChatScreen() {
         setChatActionVisible(false);
       }
     },
-    [userEmail]
+    [userEmail, authHdr] // CHANGED dep
   );
 
   // Long press handler
@@ -410,11 +480,11 @@ export default function ChatScreen() {
     if (!userEmail) return;
     (async () => {
       try {
-        const { data } = await API.get("/profile");
+        const { data } = await API.get("/profile", { headers: authHdr }); // CHANGED
         if (data?.avatar_url) setMyAvatar(data.avatar_url);
       } catch {}
     })();
-  }, [userEmail]);
+  }, [userEmail, authHdr]); // CHANGED dep
 
   // Fetch avatars for contacts (simple incremental)
   useEffect(() => {
@@ -427,7 +497,8 @@ export default function ChatScreen() {
       for (const email of toFetch) {
         try {
           const { data } = await API.get(
-            `/users/search?email=${encodeURIComponent(email)}`
+            `/users/search?email=${encodeURIComponent(email)}`,
+            { headers: authHdr } // CHANGED
           );
           if (!cancelled) {
             setContactAvatars((prev) => ({
@@ -445,13 +516,51 @@ export default function ChatScreen() {
     return () => {
       cancelled = true;
     };
-  }, [contacts, contactAvatars]);
+  }, [contacts, contactAvatars, authHdr]); // CHANGED dep
 
   const showToast = useCallback((msg, type = "success", duration = 2800) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setToast({ msg, type });
     toastTimerRef.current = setTimeout(() => setToast(null), duration);
   }, []);
+
+  // Starred messages helpers
+  const loadStarred = useCallback(async () => {
+    try {
+      setStarredLoading(true);
+      const { data } = await API.get("/messages/starred", { headers: authHdr }); // CHANGED
+      const list = Array.isArray(data) ? data : [];
+      setStarredMessages(list);
+      setStarredIds(new Set(list.map((m) => m.id)));
+    } catch {
+      // silent
+    } finally {
+      setStarredLoading(false);
+    }
+  }, [authHdr]); // CHANGED dep
+
+  const toggleStarMessage = useCallback(
+    async (messageId, shouldStar) => {
+      try {
+        await API.post(
+          `/messages/${encodeURIComponent(messageId)}/star`,
+          { action: shouldStar ? "add" : "remove" },
+          { headers: authHdr } // CHANGED
+        );
+        setStarredIds((prev) => {
+          const next = new Set(prev);
+          if (shouldStar) next.add(messageId);
+          else next.delete(messageId);
+          return next;
+        });
+        if (starredModalVisible) await loadStarred();
+        showToast(shouldStar ? "Message starred" : "Removed from starred");
+      } catch (e) {
+        showToast(e?.message || "Star action failed", "error");
+      }
+    },
+    [loadStarred, starredModalVisible, showToast, authHdr] // CHANGED dep
+  );
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: PALETTE.bg }]}>
@@ -614,6 +723,22 @@ export default function ChatScreen() {
               {showStarredOnly ? "All Chats" : "Starred Chats"}
             </Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={async () => {
+              setShowMenu(false);
+              await loadStarred();
+              setStarredModalVisible(true);
+            }}
+          >
+            <Icon
+              name="star"
+              size={16}
+              color="#ffc94d"
+              style={styles.menuIcon}
+            />
+            <Text style={styles.menuTxt}>Starred Messages</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -677,6 +802,8 @@ export default function ChatScreen() {
           ).length;
           const starred = starredChats.has(item.email);
           const avatar = contactAvatars[item.email];
+          const pres = contactPresence[item.email]; // NEW
+          const isOnline = !!pres?.online; // NEW
           return (
             <View style={styles.row}>
               <TouchableOpacity
@@ -707,6 +834,7 @@ export default function ChatScreen() {
                   <Text style={styles.name} numberOfLines={1}>
                     {item.email}
                   </Text>
+                  {isOnline && <View style={styles.onlineDot} />} {/* NEW */}
                   <View style={{ flexDirection: "row", alignItems: "center" }}>
                     {starred && (
                       <Icon
@@ -848,6 +976,33 @@ export default function ChatScreen() {
             <Text style={[styles.sheetBtnTxt, { color: "#ff6666" }]}>
               Delete Chat
             </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.sheetBtn}
+            onPress={() => {
+              const conv = messages.filter(
+                (m) =>
+                  (m.sender_email === userEmail &&
+                    m.receiver_email === chatActionEmail) ||
+                  (m.receiver_email === userEmail &&
+                    m.sender_email === chatActionEmail)
+              );
+              if (!conv.length) return;
+              const latest = conv.reduce((a, b) =>
+                new Date(a.sent_at) > new Date(b.sent_at) ? a : b
+              );
+              const isStarred = starredIds.has(latest.id);
+              toggleStarMessage(latest.id, !isStarred);
+              setChatActionVisible(false);
+            }}
+          >
+            <Icon
+              name="grade"
+              size={16}
+              color="#ffd54f"
+              style={{ marginRight: 8 }}
+            />
+            <Text style={styles.sheetBtnTxt}>Star/Unstar latest message</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.sheetBtn, { justifyContent: "center" }]}
@@ -1042,12 +1197,15 @@ export default function ChatScreen() {
             )}
             {newChatExists === true && (
               <Text style={{ color: "#33d18e", fontSize: 12 }}>
-                User found. You can open the chat.
+                {newChatFound?.userid
+                  ? `Found @${newChatFound.userid} (${newChatFound.user_email})`
+                  : `Found ${newChatFound?.user_email}`}
               </Text>
             )}
             {newChatExists === false && (
               <Text style={{ color: "#ff7777", fontSize: 12 }}>
-                No user with that email.
+                No user found by{" "}
+                {newChatEmail.includes("@") ? "email" : "username"}.
               </Text>
             )}
           </View>
@@ -1067,14 +1225,75 @@ export default function ChatScreen() {
               disabled={newChatExists !== true || newChatChecking}
               onPress={() => {
                 setNewChatVisible(false);
-                navigation.navigate("ChatWindow", {
-                  contact: newChatEmail.trim(),
-                });
+                const targetEmail =
+                  newChatFound?.user_email || newChatEmail.trim();
+                navigation.navigate("ChatWindow", { contact: targetEmail });
               }}
             >
               <Text style={styles.bcBtnSendTxt}>Open Chat</Text>
             </TouchableOpacity>
           </View>
+        </View>
+      </Modal>
+
+      {/* Starred Messages Modal */}
+      <Modal
+        transparent
+        visible={starredModalVisible}
+        animationType="fade"
+        onRequestClose={() => setStarredModalVisible(false)}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setStarredModalVisible(false)}
+        >
+          <View />
+        </Pressable>
+        <View style={[styles.modalCard, { top: "18%", maxHeight: "70%" }]}>
+          <Text style={styles.profileEmail}>Starred Messages</Text>
+          {starredLoading ? (
+            <ActivityIndicator color="#3a7afe" style={{ marginTop: 10 }} />
+          ) : starredMessages.length === 0 ? (
+            <Text style={{ color: "#9aa8b3", marginTop: 10, fontSize: 12 }}>
+              No starred messages.
+            </Text>
+          ) : (
+            <FlatList
+              data={starredMessages.sort(
+                (a, b) =>
+                  new Date(b.starred_at || b.sent_at) -
+                  new Date(a.starred_at || a.sent_at)
+              )}
+              keyExtractor={(it) => String(it.id)}
+              style={{ marginTop: 10 }}
+              contentContainerStyle={{ paddingBottom: 10 }}
+              renderItem={({ item }) => (
+                <View style={styles.starRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.starContent} numberOfLines={2}>
+                      {item.content}
+                    </Text>
+                    <Text style={styles.starMeta}>
+                      {item.sender_email}
+                      {item.sender_userid ? ` (@${item.sender_userid})` : ""}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.unstarBtn}
+                    onPress={() => toggleStarMessage(item.id, false)}
+                  >
+                    <Icon name="star" size={16} color="#ffc94d" />
+                  </TouchableOpacity>
+                </View>
+              )}
+            />
+          )}
+          <TouchableOpacity
+            onPress={() => setStarredModalVisible(false)}
+            style={{ alignSelf: "flex-end", marginTop: 10 }}
+          >
+            <Text style={{ color: "#3a7afe", fontWeight: "600" }}>Close</Text>
+          </TouchableOpacity>
         </View>
       </Modal>
 
@@ -1496,5 +1715,35 @@ const styles = StyleSheet.create({
     color: "#d5e6ff",
     fontSize: 11,
     fontWeight: "500",
+  },
+  starRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#162536",
+    borderWidth: 1,
+    borderColor: "#26405a",
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 8,
+  },
+  starContent: { color: "#e9edef", fontSize: 13 },
+  starMeta: { color: "#9aa8b3", fontSize: 11, marginTop: 2 },
+  unstarBtn: {
+    width: 34,
+    height: 34,
+    marginLeft: 8,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#273642",
+  },
+  onlineDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#28d76f",
+    marginLeft: 6,
+    marginTop: 2,
   },
 });

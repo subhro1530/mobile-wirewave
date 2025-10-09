@@ -37,6 +37,9 @@ export default function LoginScreen({ navigation }) {
       });
       const data = await res.json();
       if (res.ok && data?.token) {
+        // make token available to axios interceptor immediately
+        global.authToken = data.token; // ADDED
+
         // optimistic email source
         let loginEmail = isEmail ? email : data.email || "";
         // store token (and a best-effort email)
@@ -45,7 +48,7 @@ export default function LoginScreen({ navigation }) {
         // If user logged in by userid and email not returned, try to fetch profile email
         if (!isEmail && !data.email) {
           try {
-            const me = await API.get("/profile");
+            const me = await API.get("/profile"); // will carry Bearer via interceptor
             // use user_email from profile response
             if (me?.data?.user_email) {
               await login(data.token, me.data.user_email); // update stored email

@@ -39,7 +39,7 @@ const COLORS = {
 export default function ChatWindowScreen() {
   const route = useRoute();
   const navigation = useNavigation();
-  const { userEmail } = useContext(AuthContext);
+  const { userEmail, userToken } = useContext(AuthContext);
   const contact = route.params?.contact;
 
   const [allMessages, setAllMessages] = useState([]);
@@ -55,17 +55,20 @@ export default function ChatWindowScreen() {
   const [emojiVisible, setEmojiVisible] = useState(false); // replaces showEmoji panel
   const [shareVisible, setShareVisible] = useState(false); // FIX: added missing state
   const [toast, setToast] = useState(null); // {msg,type}
+  const [contactOnline, setContactOnline] = useState(false); // NEW
+  const [contactLastSeen, setContactLastSeen] = useState(null); // NEW
   const toastRef = useRef(null);
   const chatRef = useRef(null);
+  const authHdr = userToken ? { Authorization: `Bearer ${userToken}` } : undefined;
 
   const loadMessages = useCallback(async () => {
     try {
-      const res = await API.get("/messages");
+      const res = await API.get("/messages", { headers: authHdr });
       setAllMessages(res.data || []);
     } catch {
       /* silent */
     }
-  }, []);
+  }, [authHdr]);
 
   useEffect(() => {
     loadMessages();
@@ -88,7 +91,11 @@ export default function ChatWindowScreen() {
     (async () => {
       for (const m of unread) {
         try {
-          await API.post("/messages/read", { message_id: m.id });
+          await API.post(
+            "/messages/read",
+            { message_id: m.id },
+            { headers: authHdr }
+          );
         } catch {}
       }
       setAllMessages((prev) =>
@@ -97,23 +104,40 @@ export default function ChatWindowScreen() {
         )
       );
     })();
-  }, [conversation, userEmail]);
+  }, [conversation, userEmail, authHdr]);
 
   const sendMessage = useCallback(async () => {
     if (!text.trim() || !contact) return;
     setLoadingSend(true);
     try {
-      await API.post("/messages", {
-        receiver_email: contact,
-        content: text.trim(),
-      });
+      const { data: created } = await API.post(
+        "/messages",
+        { receiver_email: contact, content: text.trim() },
+        { headers: authHdr }
+      );
+      // Optimistic append so the user sees it immediately
+      if (created && created.id) {
+        setAllMessages((prev) => [...prev, created]);
+      }
       setText("");
+      // Also refresh from server to stay canonical
       await loadMessages();
       setTimeout(() => chatRef.current?.scrollToBottom?.(), 60);
+    } catch (e) {
+      // Surface server error
+      const msg =
+        e?.response?.data?.error ||
+        e?.response?.data?.message ||
+        (e?.response?.status === 401
+          ? "Unauthorized. Please login again."
+          : "") ||
+        e?.message ||
+        "Failed to send";
+      showToast(msg, "error");
     } finally {
       setLoadingSend(false);
     }
-  }, [text, contact, loadMessages]);
+  }, [text, contact, loadMessages, authHdr]);
 
   useEffect(() => {
     const showSub = Keyboard.addListener("keyboardDidShow", (e) => {
@@ -136,7 +160,8 @@ export default function ChatWindowScreen() {
     setProfileData(null);
     try {
       const { data } = await API.get(
-        `/users/search?email=${encodeURIComponent(contact)}`
+        `/users/search?email=${encodeURIComponent(contact)}`,
+        { headers: authHdr }
       );
       // ensure at least email; preserve userid if present
       setProfileData(
@@ -163,7 +188,7 @@ export default function ChatWindowScreen() {
     } finally {
       setProfileLoading(false);
     }
-  }, [contact]);
+  }, [contact, authHdr]);
 
   const deleteChat = useCallback(() => {
     Alert.alert("Delete Chat", `Delete chat with ${contact}?`, [
@@ -173,13 +198,15 @@ export default function ChatWindowScreen() {
         style: "destructive",
         onPress: async () => {
           try {
-            await API.delete(`/messages/${encodeURIComponent(contact)}`);
+            await API.delete(`/messages/${encodeURIComponent(contact)}`, {
+              headers: authHdr,
+            }); // CHANGED
           } catch {}
           navigation.goBack();
         },
       },
     ]);
-  }, [contact, navigation]);
+  }, [contact, navigation, authHdr]);
 
   // Fetch avatar
   useEffect(() => {
@@ -187,7 +214,8 @@ export default function ChatWindowScreen() {
     (async () => {
       try {
         const { data } = await API.get(
-          `/users/search?email=${encodeURIComponent(contact)}`
+          `/users/search?email=${encodeURIComponent(contact)}`,
+          { headers: authHdr }
         );
         if (mounted && data?.avatar_url) setAvatarUrl(data.avatar_url);
       } catch {}
@@ -195,7 +223,7 @@ export default function ChatWindowScreen() {
     return () => {
       mounted = false;
     };
-  }, [contact]);
+  }, [contact, authHdr]);
 
   const showToast = useCallback((msg, type = "success", duration = 2300) => {
     if (toastRef.current) clearTimeout(toastRef.current);
@@ -408,6 +436,49 @@ export default function ChatWindowScreen() {
     setTimeout(() => chatRef.current?.scrollToBottom?.(), 30);
   };
 
+  // NEW: presence ping for current user
+  useEffect(() => {
+    let t;
+    const ping = async () => {
+      try {
+        await API.post("/presence/ping", {}, { headers: authHdr });
+      } catch {}
+    };
+    ping();
+    t = setInterval(ping, 30000);
+    return () => clearInterval(t);
+  }, [authHdr]);
+
+  // NEW: presence lookup for this contact
+  useEffect(() => {
+    let cancelled = false;
+    const fetchPresence = async () => {
+      try {
+        const { data } = await API.get(
+          `/presence/${encodeURIComponent(contact)}`,
+          { headers: authHdr }
+        );
+        if (!cancelled) {
+          setContactOnline(!!data?.online);
+          setContactLastSeen(data?.last_seen || null);
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+    fetchPresence();
+    const i = setInterval(fetchPresence, 20000);
+    return () => {
+      cancelled = true;
+      clearInterval(i);
+    };
+  }, [contact, authHdr]);
+
+  // helper to show last seen nicely (fallback to locale string)
+  const lastSeenText = contactLastSeen
+    ? `last seen ${new Date(contactLastSeen).toLocaleString()}`
+    : "last seen unknown";
+
   return (
     <View style={styles.root}>
       {/* Outside overlay for dropdown */}
@@ -447,7 +518,7 @@ export default function ChatWindowScreen() {
             {contact}
           </Text>
           <Text style={styles.contactSub} numberOfLines={1}>
-            online
+            {contactOnline ? "online" : lastSeenText}
           </Text>
         </View>
         <TouchableOpacity style={styles.iconBtn}>
