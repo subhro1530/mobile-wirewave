@@ -4,6 +4,7 @@ import React, {
   useCallback,
   useContext,
   useMemo,
+  useRef, // ADDED
 } from "react";
 import {
   View,
@@ -73,6 +74,17 @@ export default function CommunitiesScreen() {
   const [broadcastVisible, setBroadcastVisible] = useState(false);
   const [lastBroadcastInfo, setLastBroadcastInfo] = useState(null); // NEW: fix missing state
 
+  // Group chat composer extras (emoji/share)
+  const [groupEmojiVisible, setGroupEmojiVisible] = useState(false); // NEW
+  const [groupShareVisible, setGroupShareVisible] = useState(false); // NEW
+
+  // Refs to control polling/throttling
+  const groupsTimerRef = useRef(null); // NEW
+  const loadGroupsInFlight = useRef(false); // NEW
+  const lastGroupsFetchRef = useRef(0); // NEW
+  const loadGroupsRef = useRef(null); // NEW
+  const groupFetchInFlightRef = useRef(false); // NEW
+
   // Make auth header stable across renders
   const authHdr = useMemo(
     () => (userToken ? { Authorization: `Bearer ${userToken}` } : undefined),
@@ -97,23 +109,42 @@ export default function CommunitiesScreen() {
     loadMessages();
   }, [broadcastVisible, loadMessages]);
 
-  // === GROUPS API ===
+  // === GROUPS API (throttled, no overlap) ===
   const loadGroups = useCallback(async () => {
+    const now = Date.now();
+    if (loadGroupsInFlight.current) return; // prevent overlap
+    if (now - (lastGroupsFetchRef.current || 0) < 2500) return; // throttle ~2.5s
+    loadGroupsInFlight.current = true;
     try {
       setGroupsLoading(true);
       const { data } = await API.get("/groups", { headers: authHdr });
       setGroups(Array.isArray(data) ? data : []);
+      lastGroupsFetchRef.current = Date.now();
     } catch {
     } finally {
       setGroupsLoading(false);
+      loadGroupsInFlight.current = false;
     }
   }, [authHdr]);
 
+  // Keep latest loader in a ref
   useEffect(() => {
-    loadGroups();
-    const t = setInterval(loadGroups, 10000);
-    return () => clearInterval(t);
+    loadGroupsRef.current = loadGroups;
   }, [loadGroups]);
+
+  // Single mount-time interval; uses ref to latest loader
+  useEffect(() => {
+    // initial load
+    loadGroupsRef.current?.();
+    // start interval
+    groupsTimerRef.current = setInterval(() => {
+      loadGroupsRef.current?.();
+    }, 10000);
+    return () => {
+      if (groupsTimerRef.current) clearInterval(groupsTimerRef.current);
+      groupsTimerRef.current = null;
+    };
+  }, []); // CHANGED: was [loadGroups]
 
   const openGroup = useCallback((g) => {
     setActiveGroupId(g.id);
@@ -122,11 +153,14 @@ export default function CommunitiesScreen() {
     setGroupText("");
   }, []);
 
-  // Group messages poller (only when a group is active)
+  // Group messages poller (guard overlap + avoid no-op state sets)
   useEffect(() => {
     if (!activeGroupId) return;
     let cancel = false;
+
     const fetchMsgs = async () => {
+      if (groupFetchInFlightRef.current) return; // prevent overlap
+      groupFetchInFlightRef.current = true;
       try {
         const { data } = await API.get(
           `/groups/${encodeURIComponent(
@@ -134,16 +168,39 @@ export default function CommunitiesScreen() {
           )}/messages?limit=200&offset=0`,
           { headers: authHdr }
         );
-        if (!cancel) setGroupMsgs(Array.isArray(data) ? data : []);
-      } catch {}
+        if (!cancel) {
+          const next = Array.isArray(data) ? data : [];
+          // Avoid setting state if nothing changed (cheap compare by id/sent_at)
+          setGroupMsgs((prev) => {
+            if (prev.length === next.length) {
+              let same = true;
+              for (let i = 0; i < prev.length; i++) {
+                if (
+                  prev[i]?.id !== next[i]?.id ||
+                  prev[i]?.sent_at !== next[i]?.sent_at
+                ) {
+                  same = false;
+                  break;
+                }
+              }
+              if (same) return prev;
+            }
+            return next;
+          });
+        }
+      } catch {
+      } finally {
+        groupFetchInFlightRef.current = false;
+      }
     };
+
     fetchMsgs();
     const t = setInterval(fetchMsgs, 4000);
     return () => {
       cancel = true;
       clearInterval(t);
     };
-  }, [activeGroupId, authHdr]);
+  }, [activeGroupId, authHdr]); // unchanged deps
 
   // Keyboard visibility for insets
   useEffect(() => {
@@ -325,6 +382,8 @@ export default function CommunitiesScreen() {
           { headers: authHdr }
         );
         await loadGroupInfo(activeGroupId);
+        // Announce removal to the group
+        await sendGroupSystemMessage(`${userEmail} removed ${email}`);
       } catch (e) {
         Alert.alert(
           "Error",
@@ -332,12 +391,14 @@ export default function CommunitiesScreen() {
         );
       }
     },
-    [activeGroupId, authHdr, loadGroupInfo]
+    [activeGroupId, authHdr, loadGroupInfo, sendGroupSystemMessage, userEmail]
   );
 
   const leaveGroup = useCallback(async () => {
     if (!activeGroupId) return;
     try {
+      // Announce before leaving so the API still allows sending
+      await sendGroupSystemMessage(`${userEmail} left the group`);
       await API.post(
         `/groups/${encodeURIComponent(activeGroupId)}/leave`,
         {},
@@ -353,8 +414,9 @@ export default function CommunitiesScreen() {
         e?.response?.data?.error || e.message || "Leave failed"
       );
     }
-  }, [activeGroupId, authHdr, loadGroups]);
+  }, [activeGroupId, authHdr, loadGroups, sendGroupSystemMessage, userEmail]);
 
+  // ADD/RESTORE: deleteGroup action (owner only)
   const deleteGroup = useCallback(async () => {
     if (!activeGroupId) return;
     Alert.alert("Delete Group", "This will delete the group for everyone.", [
@@ -381,6 +443,64 @@ export default function CommunitiesScreen() {
       },
     ]);
   }, [activeGroupId, authHdr, loadGroups]);
+
+  // Promote/Demote admin
+  const toggleAdmin = useCallback(
+    async (email, makeAdmin) => {
+      if (!activeGroupId || !email) return;
+      try {
+        await API.post(
+          `/groups/${encodeURIComponent(activeGroupId)}/members`,
+          { member_email: email, make_admin: !!makeAdmin },
+          { headers: authHdr }
+        );
+        await loadGroupInfo(activeGroupId);
+        await sendGroupSystemMessage(
+          makeAdmin
+            ? `${userEmail} made ${email} an admin`
+            : `${userEmail} removed ${email} as admin`
+        );
+      } catch (e) {
+        Alert.alert(
+          "Error",
+          e?.response?.data?.error || e.message || "Admin update failed"
+        );
+      }
+    },
+    [activeGroupId, authHdr, loadGroupInfo, sendGroupSystemMessage, userEmail]
+  );
+
+  // System message helper for group
+  const sendGroupSystemMessage = useCallback(
+    async (content) => {
+      if (!activeGroupId || !content?.trim()) return;
+      try {
+        await API.post(
+          `/groups/${encodeURIComponent(activeGroupId)}/messages`,
+          { content: content.trim() },
+          { headers: authHdr }
+        );
+      } catch {
+        /* silent */
+      }
+    },
+    [activeGroupId, authHdr]
+  );
+
+  // Small emoji set (same idea as direct chat)
+  const groupEmojis = [
+    "😀",
+    "😂",
+    "🥰",
+    "😍",
+    "😎",
+    "👍",
+    "🙏",
+    "🎉",
+    "🔥",
+    "✨",
+  ]; // NEW
+  const insertGroupEmoji = useCallback((em) => setGroupText((t) => t + em), []);
 
   // Derive contacts from messages (for broadcast list)
   const contacts = useMemo(() => {
@@ -491,11 +611,31 @@ export default function CommunitiesScreen() {
       />
       {/* Top bar */}
       <View style={styles.topBar}>
+        {/* Back button when inside a group chat */}
+        {!!activeGroupId && (
+          <TouchableOpacity
+            style={styles.iconBtn}
+            onPress={() => setActiveGroupId(null)}
+          >
+            <Icon name="arrow-back" size={20} color="#fff" />
+          </TouchableOpacity>
+        )}
+        {/* Group avatar tap -> settings */}
+        {!!activeGroupId && (
+          <TouchableOpacity
+            style={[styles.avatar, { marginRight: 8 }]}
+            onPress={showGroupInfo}
+          >
+            <Text style={styles.avatarTxt}>
+              {activeGroupName.slice(0, 2).toUpperCase()}
+            </Text>
+          </TouchableOpacity>
+        )}
         <Text style={styles.title}>
-          {activeGroupId ? "Group Chat" : "Groups"}
+          {activeGroupId ? activeGroupName || "Group Chat" : "Groups"}
         </Text>
         <View style={{ flex: 1 }} />
-        {!activeGroupId && (
+        {!activeGroupId ? (
           <>
             <TouchableOpacity style={styles.iconBtn} onPress={loadGroups}>
               <Icon name="refresh" size={20} color="#fff" />
@@ -513,8 +653,7 @@ export default function CommunitiesScreen() {
               <Icon name="campaign" size={20} color="#fff" />
             </TouchableOpacity>
           </>
-        )}
-        {!!activeGroupId && (
+        ) : (
           <TouchableOpacity style={styles.iconBtn} onPress={showGroupInfo}>
             <Icon name="info" size={20} color="#fff" />
           </TouchableOpacity>
@@ -570,10 +709,20 @@ export default function CommunitiesScreen() {
             currentUserEmail={userEmail}
             onRefresh={() => {}}
             onClear={() => {}}
-            bottomInset={kbVisible ? 0 : 70}
+            bottomInset={
+              groupEmojiVisible && !kbVisible ? 320 : kbVisible ? 0 : 70
+            }
           />
-          {/* Group composer with AI enhance */}
+
+          {/* Group composer: same UX as direct chat */}
           <View style={styles.messageBox}>
+            <TouchableOpacity
+              style={styles.aiBtn}
+              onPress={() => setGroupEmojiVisible(true)}
+            >
+              <Icon name="emoji-emotions" size={22} color="#9ab1c1" />
+            </TouchableOpacity>
+
             <TextInput
               style={styles.messageInput}
               multiline
@@ -582,7 +731,9 @@ export default function CommunitiesScreen() {
               value={groupText}
               onChangeText={setGroupText}
               selectionColor="#3a7afe"
+              textAlignVertical="center" // NEW
             />
+
             <TouchableOpacity
               style={[
                 styles.aiBtn,
@@ -594,9 +745,17 @@ export default function CommunitiesScreen() {
               {groupEnhancing ? (
                 <ActivityIndicator color="#9ab1c1" size="small" />
               ) : (
-                <Icon name="auto-awesome" size={20} color="#9ab1c1" />
+                <Icon name="auto-awesome" size={22} color="#9ab1c1" />
               )}
             </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.aiBtn}
+              onPress={() => setGroupShareVisible(true)}
+            >
+              <Icon name="attach-file" size={22} color="#9ab1c1" />
+            </TouchableOpacity>
+
             <TouchableOpacity
               style={[
                 styles.sendBtn,
@@ -612,6 +771,110 @@ export default function CommunitiesScreen() {
               )}
             </TouchableOpacity>
           </View>
+
+          {/* Emoji Sheet */}
+          <Modal
+            transparent
+            visible={groupEmojiVisible}
+            animationType="fade"
+            onRequestClose={() => setGroupEmojiVisible(false)}
+          >
+            <Pressable
+              style={styles.backdrop}
+              onPress={() => setGroupEmojiVisible(false)}
+            >
+              <View />
+            </Pressable>
+            <View style={styles.emojiSheet}>
+              <View style={styles.emojiHeader}>
+                <Text style={styles.infoTitle}>Emojis</Text>
+                <TouchableOpacity onPress={() => setGroupEmojiVisible(false)}>
+                  <Icon name="close" size={20} color="#e9edef" />
+                </TouchableOpacity>
+              </View>
+              <View style={styles.emojiGrid}>
+                {groupEmojis.map((em) => (
+                  <TouchableOpacity
+                    key={em}
+                    style={styles.emojiCell}
+                    onPress={() => insertGroupEmoji(em)}
+                  >
+                    <Text style={{ fontSize: 24 }}>{em}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          </Modal>
+
+          {/* Share Sheet */}
+          <Modal
+            transparent
+            visible={groupShareVisible}
+            animationType="fade"
+            onRequestClose={() => setGroupShareVisible(false)}
+          >
+            <Pressable
+              style={styles.backdrop}
+              onPress={() => setGroupShareVisible(false)}
+            >
+              <View />
+            </Pressable>
+            <View style={styles.shareSheet}>
+              <Text style={styles.infoTitle}>Share</Text>
+              <View style={styles.shareRow}>
+                <TouchableOpacity
+                  style={styles.shareItem}
+                  onPress={() =>
+                    Alert.alert("Info", "Media picker not implemented")
+                  }
+                >
+                  <View
+                    style={[styles.shareIcon, { backgroundColor: "#5c6ef8" }]}
+                  >
+                    <Icon name="image" size={20} color="#fff" />
+                  </View>
+                  <Text style={styles.preview}>Media</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.shareItem}
+                  onPress={() =>
+                    Alert.alert("Info", "Documents picker not implemented")
+                  }
+                >
+                  <View
+                    style={[styles.shareIcon, { backgroundColor: "#8e61d6" }]}
+                  >
+                    <Icon name="description" size={20} color="#fff" />
+                  </View>
+                  <Text style={styles.preview}>Documents</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.shareItem}
+                  onPress={() =>
+                    Alert.alert("Info", "Location sharing not implemented")
+                  }
+                >
+                  <View
+                    style={[styles.shareIcon, { backgroundColor: "#17a884" }]}
+                  >
+                    <Icon name="place" size={20} color="#fff" />
+                  </View>
+                  <Text style={styles.preview}>Location</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.shareItem}
+                  onPress={() => setGroupShareVisible(false)}
+                >
+                  <View
+                    style={[styles.shareIcon, { backgroundColor: "#444f5d" }]}
+                  >
+                    <Icon name="close" size={20} color="#fff" />
+                  </View>
+                  <Text style={styles.preview}>Close</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Modal>
         </KeyboardAvoidingView>
       )}
 
@@ -702,6 +965,12 @@ export default function CommunitiesScreen() {
               <Text style={styles.infoBody}>
                 Owner: {groupInfo.group?.owner_email}
               </Text>
+              {/* Admin-only edit hint for non-admins */}
+              {!isAdmin && (
+                <Text style={[styles.infoBody, { color: "#ffb74d" }]}>
+                  Only admins can edit group settings
+                </Text>
+              )}
               {isAdmin && (
                 <>
                   <Text style={[styles.infoBody, { marginTop: 10 }]}>
@@ -734,35 +1003,58 @@ export default function CommunitiesScreen() {
                 data={groupInfo.members || []}
                 keyExtractor={(m) => m.member_email}
                 style={{ maxHeight: 220, marginTop: 6 }}
-                renderItem={({ item }) => (
-                  <View
-                    style={[
-                      styles.contactRow,
-                      { backgroundColor: "transparent" },
-                    ]}
-                  >
+                renderItem={({ item }) => {
+                  const isItemAdmin =
+                    !!item.is_admin ||
+                    item.member_email === groupInfo.group?.owner_email;
+                  return (
                     <View
-                      style={[styles.avatar, { backgroundColor: "#2a3c52" }]}
+                      style={[
+                        styles.contactRow,
+                        { backgroundColor: "transparent" },
+                      ]}
                     >
-                      <Text style={styles.avatarTxt}>
-                        {item.member_email.slice(0, 2).toUpperCase()}
-                      </Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.email}>{item.member_email}</Text>
-                      <Text style={styles.preview}>
-                        {item.is_admin ? "Admin" : "Member"}
-                      </Text>
-                    </View>
-                    {isAdmin && item.member_email !== userEmail && (
-                      <TouchableOpacity
-                        onPress={() => removeMember(item.member_email)}
+                      <View
+                        style={[styles.avatar, { backgroundColor: "#2a3c52" }]}
                       >
-                        <Icon name="person-remove" size={18} color="#ff6b6b" />
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                )}
+                        <Text style={styles.avatarTxt}>
+                          {item.member_email.slice(0, 2).toUpperCase()}
+                        </Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.email}>{item.member_email}</Text>
+                        <Text style={styles.preview}>
+                          {isItemAdmin ? "Admin" : "Member"}
+                        </Text>
+                      </View>
+                      {isAdmin && item.member_email !== userEmail && (
+                        <>
+                          <TouchableOpacity
+                            onPress={() =>
+                              toggleAdmin(item.member_email, !isItemAdmin)
+                            }
+                            style={{ marginRight: 10 }}
+                          >
+                            <Icon
+                              name="admin-panel-settings"
+                              size={18}
+                              color={isItemAdmin ? "#ffb74d" : "#66d38a"}
+                            />
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            onPress={() => removeMember(item.member_email)}
+                          >
+                            <Icon
+                              name="person-remove"
+                              size={18}
+                              color="#ff6b6b"
+                            />
+                          </TouchableOpacity>
+                        </>
+                      )}
+                    </View>
+                  );
+                }}
                 ListEmptyComponent={
                   <View style={{ padding: 8 }}>
                     <Text style={{ color: C.sub, fontSize: 12 }}>
@@ -1074,10 +1366,10 @@ const styles = StyleSheet.create({
   countTxt: { color: C.sub, fontSize: 11, marginBottom: 6, paddingLeft: 4 },
   messageBox: {
     flexDirection: "row",
-    alignItems: "flex-end",
+    alignItems: "center", // CHANGED: center items like direct chat
     backgroundColor: "#182a3b",
     borderRadius: 20,
-    paddingHorizontal: 10,
+    paddingHorizontal: 8, // tighter
     paddingVertical: 6,
     borderWidth: 1,
     borderColor: "#223b53",
@@ -1087,7 +1379,9 @@ const styles = StyleSheet.create({
     color: C.text,
     fontSize: 14,
     maxHeight: 110,
-    paddingVertical: 4,
+    minHeight: 40, // NEW
+    paddingVertical: 8, // NEW
+    textAlignVertical: "center", // NEW (android)
   },
   aiBtn: {
     width: 40,
@@ -1129,5 +1423,55 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginLeft: 6,
     marginBottom: 2,
+  },
+  // Emoji/Share sheets (reuse palette)
+  emojiSheet: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "#142332",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 12,
+    paddingBottom: 20,
+    borderWidth: 1,
+    borderColor: "#21384c",
+  },
+  emojiHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    marginBottom: 6,
+  },
+  emojiGrid: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 8 },
+  emojiCell: {
+    width: "12.5%",
+    aspectRatio: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    marginVertical: 2,
+  },
+  shareSheet: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "#142332",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#21384c",
+  },
+  shareRow: { flexDirection: "row", flexWrap: "wrap" },
+  shareItem: { width: "25%", alignItems: "center", marginVertical: 10 },
+  shareIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 6,
   },
 });

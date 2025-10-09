@@ -22,6 +22,15 @@ const THEME = {
   dateText: "#7e93ad",
 };
 
+// Helper: stable color per email
+function colorForEmail(email) {
+  let h = 0;
+  for (let i = 0; i < (email || "").length; i++)
+    h = (h * 31 + email.charCodeAt(i)) >>> 0;
+  const hue = h % 360;
+  return `hsl(${hue}, 55%, 70%)`;
+}
+
 function groupByDate(list) {
   const map = {};
   list.forEach((m) => {
@@ -46,10 +55,10 @@ export default forwardRef(function ChatWindow(
     onRefresh,
     onClear,
     bottomInset = 0,
-    selectionMode = false, // new
-    selectedIds = new Set(), // new
-    onToggleSelectMessage, // new
-    onStartSelection, // new
+    selectionMode = false,
+    selectedIds = new Set(),
+    onToggleSelectMessage,
+    onStartSelection,
   },
   ref
 ) {
@@ -126,6 +135,10 @@ export default forwardRef(function ChatWindow(
             </View>
             {item.items.map((m) => {
               const isSelected = selectedIds.has(m.id);
+              const isGroup =
+                typeof activeContact === "string" &&
+                activeContact.startsWith("group:");
+              const isMe = m.sender_email === currentUserEmail;
               return (
                 <TouchableOpacity
                   key={m.id}
@@ -140,6 +153,17 @@ export default forwardRef(function ChatWindow(
                     selectionMode ? onToggleSelectMessage?.(m.id) : undefined
                   }
                 >
+                  {/* Sender label for group chats (WhatsApp-like) */}
+                  {isGroup && !isMe && (
+                    <Text
+                      style={[
+                        styles.senderLabel,
+                        { color: colorForEmail(m.sender_email) },
+                      ]}
+                    >
+                      {m.sender_userid || m.sender_email}
+                    </Text>
+                  )}
                   <MessageBubble
                     message={m}
                     currentUser={{ email: currentUserEmail }}
@@ -181,7 +205,7 @@ export default forwardRef(function ChatWindow(
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  list: { padding: 12, paddingBottom: 50, backgroundColor: "transparent" }, // increased side padding
+  list: { padding: 12, paddingBottom: 50, backgroundColor: "transparent" },
   dateWrap: {
     alignSelf: "center",
     paddingHorizontal: 12,
@@ -190,6 +214,13 @@ const styles = StyleSheet.create({
     marginVertical: 12,
   },
   dateTxt: { fontSize: 11 },
+  senderLabel: {
+    alignSelf: "flex-start",
+    marginLeft: 6,
+    marginBottom: 2,
+    fontSize: 11,
+    fontWeight: "700",
+  },
   placeholder: {
     flex: 1,
     alignItems: "center",
