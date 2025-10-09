@@ -74,6 +74,7 @@ export default function ChatScreen() {
   const [toast, setToast] = useState(null); // { msg, type } type: 'success'|'error'
   const toastTimerRef = useRef(null);
   const [showStarredOnly, setShowStarredOnly] = useState(false); // NEW state
+  const [hasProfile, setHasProfile] = useState(false); // NEW: track if my profile exists
 
   // === AUTO EMAIL EXISTENCE CHECK (debounced) ===
   useEffect(() => {
@@ -233,21 +234,66 @@ export default function ChatScreen() {
       setProfileEditMode(false);
       try {
         if (email === userEmail) {
+          // GET /profile returns user_email
           const { data } = await API.get("/profile");
-          setProfileData(data);
+          const myEmail = data?.user_email || data?.email || userEmail;
+          setHasProfile(true);
+          setProfileData({ ...data, user_email: myEmail });
           setProfileForm({
             name: data?.name || "",
             about: data?.about || "",
             avatar_url: data?.avatar_url || "",
           });
+          // fetch userid so username is shown even if /profile lacks it
+          try {
+            const { data: u } = await API.get(
+              `/users/search?email=${encodeURIComponent(myEmail)}`
+            );
+            if (u?.userid) {
+              setProfileData((prev) => ({ ...(prev || {}), userid: u.userid }));
+            }
+          } catch {}
         } else {
+          // Others via email (returns userid + profile fields or nulls)
           const { data } = await API.get(
             `/users/search?email=${encodeURIComponent(email)}`
           );
-          setProfileData(data);
+          // ensure we always show at least email
+          setProfileData(
+            data &&
+              (data.user_email ||
+                data.userid ||
+                data.name ||
+                data.about ||
+                data.avatar_url)
+              ? {
+                  user_email: data.user_email || email,
+                  userid: data.userid || null,
+                  ...data,
+                }
+              : { user_email: email }
+          );
         }
       } catch (e) {
-        setProfileError(e.message);
+        if (email === userEmail && e?.response?.status === 404) {
+          // No profile yet: allow creation (POST)
+          setHasProfile(false);
+          setProfileData(null);
+          setProfileForm({ name: "", about: "", avatar_url: "" });
+          setProfileEditMode(true);
+          setProfileError(null);
+        } else if (e?.response?.status === 404) {
+          // Other user not found: show minimal with email
+          setProfileData({ user_email: email });
+          setProfileError(null);
+        } else {
+          const msg =
+            e?.response?.data?.error ||
+            e?.response?.data?.message ||
+            e.message ||
+            "Failed to load profile";
+          setProfileError(msg);
+        }
       } finally {
         setProfileLoading(false);
       }
@@ -270,23 +316,39 @@ export default function ChatScreen() {
     try {
       setProfileLoading(true);
       setProfileError(null);
-      const method = profileData ? "put" : "post";
       const payload = {
         name: profileForm.name.trim(),
         about: profileForm.about.trim(),
         avatar_url: profileForm.avatar_url.trim(),
       };
-      const { data } = await API[method]("/profile", payload);
-      setProfileData(data);
+      // Create if none, otherwise update
+      const method = hasProfile ? "put" : "post";
+      await API[method]("/profile", payload);
+
+      // Refresh with GET /profile
+      const { data: fresh } = await API.get("/profile");
+      setHasProfile(true);
+      setProfileData(fresh);
+      setProfileForm({
+        name: fresh?.name || "",
+        about: fresh?.about || "",
+        avatar_url: fresh?.avatar_url || "",
+      });
+      if (fresh?.avatar_url) setMyAvatar(fresh.avatar_url);
       setProfileEditMode(false);
-      showToast("Profile saved", "success");
+      showToast("Profile updated", "success");
     } catch (e) {
-      setProfileError(e.message);
-      showToast(e.message || "Save failed", "error");
+      const msg =
+        e?.response?.data?.error ||
+        e?.response?.data?.message ||
+        e.message ||
+        "Save failed";
+      setProfileError(msg);
+      showToast(msg, "error");
     } finally {
       setProfileLoading(false);
     }
-  }, [profileViewingEmail, userEmail, profileForm, profileData, showToast]);
+  }, [profileViewingEmail, userEmail, profileForm, hasProfile, showToast]);
 
   // Chat actions
   const toggleArchive = useCallback((email) => {
@@ -870,6 +932,7 @@ export default function ChatScreen() {
                     onChangeText={(v) =>
                       setProfileForm((f) => ({ ...f, name: v }))
                     }
+                    selectionColor="#3a7afe" // added
                   />
                   <RNTextInput
                     style={[styles.editInput, { height: 80 }]}
@@ -880,6 +943,7 @@ export default function ChatScreen() {
                     onChangeText={(v) =>
                       setProfileForm((f) => ({ ...f, about: v }))
                     }
+                    selectionColor="#3a7afe" // added
                   />
                   <RNTextInput
                     style={styles.editInput}
@@ -890,6 +954,7 @@ export default function ChatScreen() {
                     onChangeText={(v) =>
                       setProfileForm((f) => ({ ...f, avatar_url: v }))
                     }
+                    selectionColor="#3a7afe" // added
                   />
                   <View style={styles.editActions}>
                     <TouchableOpacity
@@ -927,7 +992,11 @@ export default function ChatScreen() {
                   </Text>
                   <Text style={styles.heading}>Email</Text>
                   <Text style={styles.profileMetaLine}>
-                    {profileViewingEmail}
+                    {profileData?.user_email || profileViewingEmail}
+                  </Text>
+                  <Text style={styles.heading}>Username</Text>
+                  <Text style={styles.profileMetaLine}>
+                    {profileData?.userid || "—"}
                   </Text>
                   <Text style={styles.heading}>Avatar URL</Text>
                   <Text style={styles.profileMetaLine}>

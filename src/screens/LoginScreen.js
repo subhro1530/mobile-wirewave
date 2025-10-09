@@ -46,8 +46,9 @@ export default function LoginScreen({ navigation }) {
         if (!isEmail && !data.email) {
           try {
             const me = await API.get("/profile");
-            if (me?.data?.email) {
-              await login(data.token, me.data.email); // update stored email
+            // use user_email from profile response
+            if (me?.data?.user_email) {
+              await login(data.token, me.data.user_email); // update stored email
             }
           } catch {
             // ignore; app will still work with userid until messages load

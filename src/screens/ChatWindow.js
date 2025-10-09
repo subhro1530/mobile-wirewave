@@ -138,9 +138,28 @@ export default function ChatWindowScreen() {
       const { data } = await API.get(
         `/users/search?email=${encodeURIComponent(contact)}`
       );
-      setProfileData(data);
+      // ensure at least email; preserve userid if present
+      setProfileData(
+        data &&
+          (data.user_email ||
+            data.userid ||
+            data.name ||
+            data.about ||
+            data.avatar_url)
+          ? {
+              user_email: data.user_email || contact,
+              userid: data.userid || null,
+              ...data,
+            }
+          : { user_email: contact }
+      );
     } catch (e) {
-      setProfileError(e.message);
+      if (e?.response?.status === 404) {
+        setProfileData({ user_email: contact }); // minimal fallback
+        setProfileError(null);
+      } else {
+        setProfileError(e.message);
+      }
     } finally {
       setProfileLoading(false);
     }
@@ -622,6 +641,10 @@ export default function ChatWindowScreen() {
               </Text>
               <Text style={styles.heading}>Email</Text>
               <Text style={styles.profileMetaLine}>{contact}</Text>
+              <Text style={styles.heading}>Username</Text>
+              <Text style={styles.profileMetaLine}>
+                {profileData.userid || "—"}
+              </Text>
               <Text style={styles.heading}>Avatar URL</Text>
               <Text style={styles.profileMetaLine}>
                 {profileData.avatar_url || "—"}
