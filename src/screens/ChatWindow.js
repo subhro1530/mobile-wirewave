@@ -148,6 +148,35 @@ export default function ChatWindowScreen() {
     }
   }, [text, contact, loadMessages, authHdr]);
 
+  // NEW: enhance current draft using AI
+  const enhanceText = useCallback(async () => {
+    const draft = text.trim();
+    if (!draft || enhancing) return;
+    setEnhancing(true);
+    try {
+      const payload = {
+        text:
+          "pls improve this sentence ok, just give the enhanced version without any words from you here is the text: " +
+          draft,
+      };
+      const { data } = await API.post("/ai/enhance-chat", payload, {
+        headers: authHdr,
+      });
+      const out = (data?.enhanced || "").toString().trim();
+      if (out) setText(out);
+      else showToast("No enhancement returned", "error");
+    } catch (e) {
+      const msg =
+        e?.response?.data?.error ||
+        e?.response?.data?.message ||
+        e?.message ||
+        "Enhance failed";
+      showToast(msg, "error");
+    } finally {
+      setEnhancing(false);
+    }
+  }, [text, enhancing, authHdr, showToast]);
+
   // Replace keyboard listeners: only track visibility and keep auto-scroll
   useEffect(() => {
     const showSub = Keyboard.addListener("keyboardDidShow", () => {
@@ -568,6 +597,24 @@ export default function ChatWindowScreen() {
     }
   }, [locSending, contact, authHdr, showToast]); // NEW
 
+  // Derive the "last seen" text from presence (online/last_seen)
+  const lastSeenText = (() => {
+    if (!contactOnline) {
+      if (!contactLastSeen) return "offline";
+      const diff = Date.now() - new Date(contactLastSeen).getTime();
+      const m = Math.floor(diff / 60000);
+      const h = Math.floor(diff / 3600000);
+      if (m < 1) return "last seen just now";
+      if (m < 60) return `last seen ${m} min ago`;
+      if (h < 24) return `last seen ${h} hr${h > 1 ? "s" : ""} ago`;
+      return `last seen ${new Date(contactLastSeen).toLocaleString()}`;
+    }
+    return "online";
+  })();
+
+  // Safe no-op to avoid reference error if no message action UI is present
+  const onLongPressMessage = useCallback(() => {}, []);
+
   return (
     <View style={styles.root}>
       {/* Outside overlay for dropdown */}
@@ -671,8 +718,8 @@ export default function ChatWindowScreen() {
           activeContact={contact}
           messages={conversation}
           currentUserEmail={userEmail}
-          onRefresh={refreshChat} // CHANGED
-          refreshing={refreshing} // NEW
+          onRefresh={refreshChat}
+          refreshing={refreshing}
           onClear={() => {}}
           bottomInset={emojiVisible && !kbVisible ? 320 : kbVisible ? 0 : 70}
           onLongPressMessage={onLongPressMessage}
