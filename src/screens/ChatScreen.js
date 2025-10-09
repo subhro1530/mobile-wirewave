@@ -60,8 +60,9 @@ export default function ChatScreen() {
   const [newChatExists, setNewChatExists] = useState(null); // true/false/null
   const [archivedChats, setArchivedChats] = useState(new Set()); // new
   const [showArchivedView, setShowArchivedView] = useState(false); // new
-  const [pinnedChats, setPinnedChats] = useState(new Set()); // RENAMED from starredChats
-  const [showPinnedOnly, setShowPinnedOnly] = useState(false); // RENAMED
+  const [starredModalVisible, setStarredModalVisible] = useState(false); // NEW
+  const [starredLoading, setStarredLoading] = useState(false); // NEW
+  const [starredList, setStarredList] = useState([]); // NEW
   const [chatActionEmail, setChatActionEmail] = useState(null); // long-press target
   const [chatActionVisible, setChatActionVisible] = useState(false); // long-press modal
   const [profileViewingEmail, setProfileViewingEmail] = useState(null); // which profile
@@ -121,18 +122,6 @@ export default function ChatScreen() {
   }, [newChatEmail, newChatVisible, authHdr]); // CHANGED dep
 
   // === Added missing callbacks ===
-  const testConnection = useCallback(async () => {
-    try {
-      const { data } = await API.get("/testdb", { headers: authHdr }); // CHANGED
-      showToast(
-        data?.status ? `Server: ${data.status}` : "Server OK",
-        "success"
-      );
-    } catch (e) {
-      showToast(e.message || "Connection Failed", "error");
-    }
-  }, [showToast, authHdr]);
-
   const deleteAccount = useCallback(() => {
     Alert.alert("Delete Account", "This cannot be undone. Continue?", [
       { text: "Cancel", style: "cancel" },
@@ -222,7 +211,7 @@ export default function ChatScreen() {
           "starredChats",
         ]);
         if (a?.[1]) setArchivedChats(new Set(JSON.parse(a[1])));
-        if (s?.[1]) setPinnedChats(new Set(JSON.parse(s[1])));
+        // REMOVE: pinnedChats loading
       } catch {}
     })();
   }, []);
@@ -234,12 +223,7 @@ export default function ChatScreen() {
       JSON.stringify(Array.from(archivedChats))
     ).catch(() => {});
   }, [archivedChats]);
-  useEffect(() => {
-    AsyncStorage.setItem(
-      "pinnedChats",
-      JSON.stringify(Array.from(pinnedChats))
-    ).catch(() => {});
-  }, [pinnedChats]);
+  // REMOVE: pinnedChats persisting
 
   // Derive contacts from messages
   const contacts = React.useMemo(() => {
@@ -267,25 +251,18 @@ export default function ChatScreen() {
         ? archivedChats.has(c.email)
         : !archivedChats.has(c.email)
     );
-    // pin priority first
-    list.sort((a, b) => {
-      const aPin = pinnedChats.has(a.email);
-      const bPin = pinnedChats.has(b.email);
-      if (aPin && !bPin) return -1;
-      if (bPin && !aPin) return 1;
-      return new Date(b.lastMessageTime) - new Date(a.lastMessageTime);
-    });
+    // just time-based sort
+    list.sort((a, b) => new Date(b.lastMessageTime) - new Date(a.lastMessageTime));
     return list;
-  }, [messages, userEmail, archivedChats, showArchivedView, pinnedChats]);
+  }, [messages, userEmail, archivedChats, showArchivedView]);
 
   // Filter contacts by search
-  const filtered = contacts
-    .filter(
-      (c) =>
-        c.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (c.lastMessage || "").toLowerCase().includes(searchQuery.toLowerCase())
-    )
-    .filter((c) => (!showPinnedOnly ? true : pinnedChats.has(c.email)));
+  const filtered = contacts.filter(
+    (c) =>
+      c.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (c.lastMessage || "").toLowerCase().includes(searchQuery.toLowerCase())
+  );
+  // .filter((c) => (!showPinnedOnly ? true : pinnedChats.has(c.email)));
 
   // Unified profile open
   const openProfile = useCallback(
@@ -424,14 +401,6 @@ export default function ChatScreen() {
     });
     setChatActionVisible(false);
   }, []);
-  const togglePinChat = useCallback((email) => {
-    setPinnedChats((prev) => {
-      const next = new Set(prev);
-      next.has(email) ? next.delete(email) : next.add(email);
-      return next;
-    });
-    setChatActionVisible(false);
-  }, []);
   const deleteChat = useCallback(
     async (email) => {
       try {
@@ -452,11 +421,7 @@ export default function ChatScreen() {
           next.delete(email);
           return next;
         });
-        setPinnedChats((prev) => {
-          const next = new Set(prev);
-          next.delete(email);
-          return next;
-        });
+        // REMOVE: pinnedChats handling
       } catch (e) {
         Alert.alert("Error", e.message);
       } finally {
@@ -520,6 +485,23 @@ export default function ChatScreen() {
     setToast({ msg, type });
     toastTimerRef.current = setTimeout(() => setToast(null), duration);
   }, []);
+
+  // NEW: openStarred function
+  const openStarred = useCallback(async () => {
+    setStarredModalVisible(true);
+    setStarredLoading(true);
+    try {
+      const { data } = await API.get("/messages/starred", { headers: authHdr });
+      const arr = Array.isArray(data) ? data : [];
+      // newest first
+      arr.sort((a, b) => new Date(b.sent_at) - new Date(a.sent_at));
+      setStarredList(arr);
+    } catch {
+      setStarredList([]);
+    } finally {
+      setStarredLoading(false);
+    }
+  }, [authHdr]);
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: PALETTE.bg }]}>
@@ -610,28 +592,18 @@ export default function ChatScreen() {
               openProfile(userEmail);
             }}
           >
-            <Icon
-              name="person"
-              size={16}
-              color="#3a7afe"
-              style={styles.menuIcon}
-            />
+            <Icon name="person" size={16} color="#3a7afe" style={styles.menuIcon} />
             <Text style={styles.menuTxt}>My Profile</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.menuItem}
             onPress={() => {
               setShowMenu(false);
-              testConnection();
+              openStarred();
             }}
           >
-            <Icon
-              name="wifi-tethering"
-              size={16}
-              color="#3a7afe"
-              style={styles.menuIcon}
-            />
-            <Text style={styles.menuTxt}>Test Connection</Text>
+            <Icon name="grade" size={16} color="#ffd54f" style={styles.menuIcon} />
+            <Text style={styles.menuTxt}>Starred Messages</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.menuItem}
@@ -640,15 +612,8 @@ export default function ChatScreen() {
               deleteAccount();
             }}
           >
-            <Icon
-              name="delete-forever"
-              size={16}
-              color="#ff7777"
-              style={styles.menuIcon}
-            />
-            <Text style={[styles.menuTxt, { color: "#ff7777" }]}>
-              Delete Account
-            </Text>
+            <Icon name="delete-forever" size={16} color="#ff7777" style={styles.menuIcon} />
+            <Text style={[styles.menuTxt, { color: "#ff7777" }]}>Delete Account</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.menuItem}
@@ -657,46 +622,13 @@ export default function ChatScreen() {
               logout?.();
             }}
           >
-            <Icon
-              name="logout"
-              size={16}
-              color="#ff6b6b"
-              style={styles.menuIcon}
-            />
+            <Icon name="logout" size={16} color="#ff6b6b" style={styles.menuIcon} />
             <Text style={[styles.menuTxt, { color: "#ff6b6b" }]}>Logout</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => {
-              setShowMenu(false);
-              setShowPinnedOnly((v) => !v);
-            }}
-          >
-            <Icon
-              name={showPinnedOnly ? "push-pin" : "push-pin"}
-              size={16}
-              color="#ffc94d"
-              style={styles.menuIcon}
-            />
-            <Text style={styles.menuTxt}>
-              {showPinnedOnly ? "All Chats" : "Pinned Chats"}
-            </Text>
           </TouchableOpacity>
         </View>
       )}
 
       {/* Chats List */}
-      {showPinnedOnly && (
-        <View style={styles.starredBanner}>
-          <Icon
-            name="push-pin"
-            size={14}
-            color="#ffc94d"
-            style={{ marginRight: 6 }}
-          />
-          <Text style={styles.starredBannerTxt}>Showing pinned chats</Text>
-        </View>
-      )}
       <FlatList
         data={filtered}
         keyExtractor={(item) => item.email}
@@ -743,7 +675,6 @@ export default function ChatScreen() {
               m.receiver_email === userEmail &&
               !m.read
           ).length;
-          const pinned = pinnedChats.has(item.email); // RENAMED
           const avatar = contactAvatars[item.email];
           const pres = contactPresence[item.email];
           const winMs = (pres?.window_seconds ?? 60) * 1000;
@@ -785,14 +716,6 @@ export default function ChatScreen() {
                   </Text>
                   {isOnline && <View style={styles.onlineDot} />}
                   <View style={{ flexDirection: "row", alignItems: "center" }}>
-                    {pinned && (
-                      <Icon
-                        name="push-pin"
-                        size={14}
-                        color={PALETTE.brandAccent}
-                        style={{ marginRight: 4 }}
-                      />
-                    )}
                     <Text style={styles.time}>
                       {item.lastMessageTime &&
                         new Date(item.lastMessageTime).toLocaleTimeString([], {
@@ -869,20 +792,6 @@ export default function ChatScreen() {
           <Text style={styles.sheetTitle}>{chatActionEmail}</Text>
           <TouchableOpacity
             style={styles.sheetBtn}
-            onPress={() => togglePinChat(chatActionEmail)}
-          >
-            <Icon
-              name={pinnedChats.has(chatActionEmail) ? "push-pin" : "push-pin"}
-              size={16}
-              color="#ffd54f"
-              style={{ marginRight: 8 }}
-            />
-            <Text style={styles.sheetBtnTxt}>
-              {pinnedChats.has(chatActionEmail) ? "Unpin" : "Pin"}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.sheetBtn}
             onPress={() => toggleArchive(chatActionEmail)}
           >
             <Icon
@@ -912,16 +821,8 @@ export default function ChatScreen() {
             />
             <Text style={styles.sheetBtnTxt}>View Profile</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.sheetBtn}
-            onPress={() => deleteChat(chatActionEmail)}
-          >
-            <Icon
-              name="delete"
-              size={16}
-              color="#ff6666"
-              style={{ marginRight: 8 }}
-            />
+          <TouchableOpacity style={styles.sheetBtn} onPress={() => deleteChat(chatActionEmail)}>
+            <Icon name="delete" size={16} color="#ff6666" style={{ marginRight: 8 }} />
             <Text style={[styles.sheetBtnTxt, { color: "#ff6666" }]}>
               Delete Chat
             </Text>
@@ -930,9 +831,7 @@ export default function ChatScreen() {
             style={[styles.sheetBtn, { justifyContent: "center" }]}
             onPress={() => setChatActionVisible(false)}
           >
-            <Text style={[styles.sheetBtnTxt, { color: "#8696a0" }]}>
-              Cancel
-            </Text>
+            <Text style={[styles.sheetBtnTxt, { color: "#8696a0" }]}>Cancel</Text>
           </TouchableOpacity>
         </View>
       </Modal>
@@ -1139,22 +1038,87 @@ export default function ChatScreen() {
             >
               <Text style={styles.bcBtnCancelTxt}>Cancel</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.bcBtnSend,
-                (newChatExists !== true || newChatChecking) && { opacity: 0.4 },
-              ]}
-              disabled={newChatExists !== true || newChatChecking}
-              onPress={() => {
-                setNewChatVisible(false);
-                const targetEmail =
-                  newChatFound?.user_email || newChatEmail.trim();
-                navigation.navigate("ChatWindow", { contact: targetEmail });
-              }}
-            >
-              <Text style={styles.bcBtnSendTxt}>Open Chat</Text>
+            {(() => {
+              const isValidEmail = /\S+@\S+\.\S+/.test(newChatEmail.trim()); // NEW
+              return (
+                <TouchableOpacity
+                  style={[
+                    styles.bcBtnSend,
+                    (!isValidEmail || newChatChecking) && { opacity: 0.4 },
+                  ]}
+                  disabled={!isValidEmail || newChatChecking}
+                  onPress={() => {
+                    setNewChatVisible(false);
+                    const targetEmail = newChatFound?.user_email || newChatEmail.trim();
+                    navigation.navigate("ChatWindow", { contact: targetEmail });
+                  }}
+                >
+                  <Text style={styles.bcBtnSendTxt}>Open Chat</Text>
+                </TouchableOpacity>
+              );
+            })()}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Starred Messages Modal (NEW) */}
+      <Modal
+        transparent
+        visible={starredModalVisible}
+        animationType="fade"
+        onRequestClose={() => setStarredModalVisible(false)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setStarredModalVisible(false)}>
+          <View />
+        </Pressable>
+        <View style={[styles.modalCard, { top: "18%", maxHeight: "64%" }]}>
+          <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
+            <Icon name="grade" size={18} color="#ffd54f" style={{ marginRight: 8 }} />
+            <Text style={{ color: "#e9edef", fontSize: 16, fontWeight: "700", flex: 1 }}>
+              Starred Messages
+            </Text>
+            <TouchableOpacity onPress={() => setStarredModalVisible(false)}>
+              <Icon name="close" size={18} color="#9ab1c1" />
             </TouchableOpacity>
           </View>
+          {starredLoading ? (
+            <ActivityIndicator color="#3a7afe" />
+          ) : starredList.length === 0 ? (
+            <Text style={{ color: "#8696a0", fontSize: 12 }}>No starred messages</Text>
+          ) : (
+            <FlatList
+              data={starredList}
+              keyExtractor={(m) => String(m.id)}
+              style={{ maxHeight: 360, marginTop: 4 }}
+              renderItem={({ item }) => {
+                const peer =
+                  item.sender_email === userEmail ? item.receiver_email : item.sender_email;
+                return (
+                  <TouchableOpacity
+                    style={{
+                      paddingVertical: 10,
+                      borderBottomWidth: StyleSheet.hairlineWidth,
+                      borderBottomColor: "#2a2a2a",
+                    }}
+                    onPress={() => {
+                      setStarredModalVisible(false);
+                      navigation.navigate("ChatWindow", { contact: peer });
+                    }}
+                  >
+                    <Text style={{ color: "#e9edef", fontWeight: "600", fontSize: 13 }}>
+                      {peer}
+                    </Text>
+                    <Text style={{ color: "#9aa8b3", fontSize: 12, marginTop: 2 }} numberOfLines={2}>
+                      {item.content}
+                    </Text>
+                    <Text style={{ color: "#6d7d92", fontSize: 10, marginTop: 2 }}>
+                      {new Date(item.sent_at).toLocaleString()}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              }}
+            />
+          )}
         </View>
       </Modal>
 
@@ -1609,4 +1573,5 @@ const styles = StyleSheet.create({
     marginLeft: 6,
     marginTop: 2,
   },
+
 });

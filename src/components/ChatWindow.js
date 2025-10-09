@@ -60,6 +60,7 @@ export default forwardRef(function ChatWindow(
     onToggleSelectMessage,
     onStartSelection,
     onLongPressMessage, // NEW
+    refreshing = false, // NEW
   },
   ref
 ) {
@@ -178,7 +179,7 @@ export default forwardRef(function ChatWindow(
         )}
         keyboardShouldPersistTaps="handled"
         onRefresh={onRefresh}
-        refreshing={false}
+        refreshing={refreshing} // CHANGED: was false
         contentContainerStyle={[styles.list, { paddingBottom: bottomInset }]}
         onScroll={(e) => {
           const { contentOffset, contentSize, layoutMeasurement } =

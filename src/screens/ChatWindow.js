@@ -67,6 +67,7 @@ export default function ChatWindowScreen() {
   const [starredIds, setStarredIds] = useState(new Set()); // NEW: cache starred messages
   const [msgActionVisible, setMsgActionVisible] = useState(false); // NEW
   const [targetMsg, setTargetMsg] = useState(null); // NEW
+  const [refreshing, setRefreshing] = useState(false); // NEW
 
   const loadMessages = useCallback(async () => {
     try {
@@ -457,137 +458,50 @@ export default function ChatWindowScreen() {
     return () => clearInterval(t);
   }, [authHdr]);
 
-  // Presence lookup with window_seconds guard
+  // Factor presence lookup so we can reuse on pull-to-refresh
+  const refreshPresence = useCallback(async () => {
+    try {
+      const { data } = await API.get(
+        `/presence/${encodeURIComponent(contact)}`,
+        { headers: authHdr }
+      );
+      const winMs = (data?.window_seconds ?? 60) * 1000;
+      const seenMs = data?.last_seen ? new Date(data.last_seen).getTime() : 0;
+      const withinWindow = seenMs ? Date.now() - seenMs <= winMs : true;
+      const isOnline = !!data?.online && withinWindow;
+      setContactOnline(isOnline);
+      setContactLastSeen(data?.last_seen || null);
+    } catch {}
+  }, [contact, authHdr]); // NEW
+
+  // Presence lookup interval now uses refreshPresence
   useEffect(() => {
     let cancelled = false;
-    const fetchPresence = async () => {
-      try {
-        const { data } = await API.get(
-          `/presence/${encodeURIComponent(contact)}`,
-          { headers: authHdr }
-        );
-        if (!cancelled) {
-          const winMs = (data?.window_seconds ?? 60) * 1000;
-          const seenMs = data?.last_seen
-            ? new Date(data.last_seen).getTime()
-            : 0;
-          const withinWindow = seenMs ? Date.now() - seenMs <= winMs : true;
-          const isOnline = !!data?.online && withinWindow;
-          setContactOnline(isOnline);
-          setContactLastSeen(data?.last_seen || null);
-        }
-      } catch {}
+    const run = async () => {
+      if (!cancelled) await refreshPresence();
     };
-    fetchPresence();
-    const i = setInterval(fetchPresence, 20000);
+    run();
+    const i = setInterval(run, 20000);
     return () => {
       cancelled = true;
       clearInterval(i);
     };
-  }, [contact, authHdr]);
+  }, [refreshPresence]); // CHANGED
 
-  // Relative formatter
-  const lastSeenText = (() => {
-    if (!contactOnline) {
-      if (!contactLastSeen) return "offline";
-      const diff = Date.now() - new Date(contactLastSeen).getTime();
-      const m = Math.floor(diff / 60000);
-      const h = Math.floor(diff / 3600000);
-      if (m < 1) return "last seen just now";
-      if (m < 60) return `last seen ${m} min ago`;
-      if (h < 24) return `last seen ${h} hr${h > 1 ? "s" : ""} ago`;
-      return `last seen ${new Date(contactLastSeen).toLocaleString()}`;
-    }
-    return "online";
-  })();
-
-  const enhanceText = useCallback(async () => {
-    const draft = text.trim();
-    if (!draft || enhancing) return;
-    setEnhancing(true);
+  // Pull-to-refresh handler: ping + presence + messages
+  const refreshChat = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
     try {
-      // Use the exact prompt pattern requested, appending the user's draft
-      const payload = {
-        text:
-          "pls improve this sentence ok, just give the enhanced version without any words from you here is the text: " +
-          draft,
-      };
-      const { data } = await API.post("/ai/enhance-chat", payload, {
-        headers: authHdr,
-      });
-      const out = (data?.enhanced || "").toString().trim();
-      if (out) {
-        setText(out);
-      } else {
-        showToast("No enhancement returned", "error");
-      }
-    } catch (e) {
-      const msg =
-        e?.response?.data?.error ||
-        e?.response?.data?.message ||
-        e?.message ||
-        "Enhance failed";
-      showToast(msg, "error");
+      // mark me online
+      await API.post("/presence/ping", {}, { headers: authHdr });
+    } catch {}
+    try {
+      await Promise.all([refreshPresence(), loadMessages()]);
     } finally {
-      setEnhancing(false);
+      setRefreshing(false);
     }
-  }, [text, enhancing, authHdr, showToast]);
-
-  // Load starred list once for quick toggle state
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const { data } = await API.get("/messages/starred", { headers: authHdr });
-        if (!cancelled) {
-          const ids = new Set((Array.isArray(data) ? data : []).map((m) => m.id));
-          setStarredIds(ids);
-        }
-      } catch {}
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [authHdr]); // NEW
-
-  // Long-press hook from ChatWindow
-  const onLongPressMessage = useCallback((m) => {
-    setTargetMsg(m);
-    setMsgActionVisible(true);
-  }, []); // NEW
-
-  const toggleStarMessage = useCallback(async () => {
-    if (!targetMsg?.id) return;
-    const isStarred = starredIds.has(targetMsg.id);
-    try {
-      await API.post(
-        `/messages/${encodeURIComponent(targetMsg.id)}/star`,
-        { action: isStarred ? "remove" : "add" },
-        { headers: authHdr }
-      );
-      setStarredIds((prev) => {
-        const next = new Set(prev);
-        if (isStarred) next.delete(targetMsg.id);
-        else next.add(targetMsg.id);
-        return next;
-      });
-      setMsgActionVisible(false);
-      showToast(isStarred ? "Unstarred message" : "Starred message");
-    } catch (e) {
-      showToast(e?.response?.data?.error || e?.message || "Action failed", "error");
-    }
-  }, [targetMsg, starredIds, authHdr, showToast]); // NEW
-
-  const copyMessage = useCallback(async () => {
-    if (!targetMsg?.content) return;
-    try {
-      await Clipboard.setStringAsync(targetMsg.content);
-      setMsgActionVisible(false);
-      showToast("Copied to clipboard");
-    } catch {
-      showToast("Copy failed", "error");
-    }
-  }, [targetMsg, showToast]); // NEW
+  }, [authHdr, refreshPresence, loadMessages, refreshing]); // NEW
 
   return (
     <View style={styles.root}>
@@ -683,19 +597,20 @@ export default function ChatWindowScreen() {
       )}
 
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"} // CHANGED
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1 }}
-        keyboardVerticalOffset={0} // CHANGED: no extra offset; custom header already inside screen
+        keyboardVerticalOffset={0}
       >
         <ChatWindow
           ref={chatRef}
           activeContact={contact}
           messages={conversation}
           currentUserEmail={userEmail}
-          onRefresh={loadMessages}
+          onRefresh={refreshChat} // CHANGED
+          refreshing={refreshing} // NEW
           onClear={() => {}}
-          bottomInset={emojiVisible && !kbVisible ? 320 : kbVisible ? 0 : 70} // CHANGED: avoid double raise when keyboard open
-          onLongPressMessage={onLongPressMessage} // NEW
+          bottomInset={emojiVisible && !kbVisible ? 320 : kbVisible ? 0 : 70}
+          onLongPressMessage={onLongPressMessage}
         />
 
         {/* Composer */}
@@ -832,18 +747,27 @@ export default function ChatWindowScreen() {
               style={{ marginRight: 8 }}
             />
             <Text style={styles.sheetBtnTxt}>
-              {starredIds.has(targetMsg?.id) ? "Unstar Message" : "Star Message"}
+              {starredIds.has(targetMsg?.id)
+                ? "Unstar Message"
+                : "Star Message"}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.sheetBtn} onPress={copyMessage}>
-            <Icon name="content-copy" size={16} color="#9ab1c1" style={{ marginRight: 8 }} />
+            <Icon
+              name="content-copy"
+              size={16}
+              color="#9ab1c1"
+              style={{ marginRight: 8 }}
+            />
             <Text style={styles.sheetBtnTxt}>Copy</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.sheetBtn, { justifyContent: "center" }]}
             onPress={() => setMsgActionVisible(false)}
           >
-            <Text style={[styles.sheetBtnTxt, { color: "#8696a0" }]}>Cancel</Text>
+            <Text style={[styles.sheetBtnTxt, { color: "#8696a0" }]}>
+              Cancel
+            </Text>
           </TouchableOpacity>
         </View>
       </Modal>
