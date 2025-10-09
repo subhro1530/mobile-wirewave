@@ -27,6 +27,7 @@ import Icon from "react-native-vector-icons/MaterialIcons";
 import API from "../api";
 import { AuthContext } from "../AuthContext";
 import ChatWindow from "../components/ChatWindow";
+import { useNavigation } from "@react-navigation/native"; // ADDED
 
 const C = {
   bg: "#0b141a",
@@ -41,6 +42,7 @@ const C = {
 
 export default function CommunitiesScreen() {
   const { userEmail, userToken } = useContext(AuthContext);
+  const navigation = useNavigation(); // ADDED
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
@@ -602,6 +604,14 @@ export default function CommunitiesScreen() {
     }
   }, [content, enhancing, authHdr]);
 
+  // Hide tab bar while inside a group chat (restores automatically)
+  useEffect(() => {
+    const parent = navigation.getParent?.();
+    if (!parent) return;
+    if (activeGroupId) parent.setOptions({ tabBarStyle: { display: "none" } });
+    else parent.setOptions({ tabBarStyle: undefined });
+  }, [navigation, activeGroupId]); // ADDED
+
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar
@@ -655,7 +665,8 @@ export default function CommunitiesScreen() {
           </>
         ) : (
           <TouchableOpacity style={styles.iconBtn} onPress={showGroupInfo}>
-            <Icon name="info" size={20} color="#fff" />
+            <Icon name="edit" size={20} color="#fff" />{" "}
+            {/* CHANGED from info to edit */}
           </TouchableOpacity>
         )}
       </View>
@@ -862,7 +873,7 @@ export default function CommunitiesScreen() {
                   <Text style={styles.preview}>Location</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={styles.shareItem}
+                  style={[styles.shareItem, { backgroundColor: "#444f5d" }]}
                   onPress={() => setGroupShareVisible(false)}
                 >
                   <View
@@ -954,121 +965,79 @@ export default function CommunitiesScreen() {
         >
           <View />
         </Pressable>
-        <View style={styles.infoCard}>
+        <View style={styles.infoCard /* CHANGED sizing below in styles */}>
+          {/* Header with title + close */}
+          <View style={styles.infoHeaderRow}>
+            <Text style={styles.infoTitle}>
+              {groupInfo?.group?.name || activeGroupName || "Group Settings"}
+            </Text>
+            <TouchableOpacity
+              onPress={() => setGroupInfoVisible(false)}
+              style={{ padding: 6 }}
+            >
+              <Icon name="close" size={20} color={C.text} />
+            </TouchableOpacity>
+          </View>
+
           {groupInfoLoading ? (
-            <ActivityIndicator color={C.accent} />
+            <ActivityIndicator color={C.accent} style={{ marginTop: 10 }} />
           ) : groupInfo ? (
             <>
-              <Text style={styles.infoTitle}>
-                {groupInfo.group?.name || activeGroupName}
-              </Text>
               <Text style={styles.infoBody}>
                 Owner: {groupInfo.group?.owner_email}
               </Text>
-              {/* Admin-only edit hint for non-admins */}
+
+              {/* Non-admin hint */}
               {!isAdmin && (
                 <Text style={[styles.infoBody, { color: "#ffb74d" }]}>
                   Only admins can edit group settings
                 </Text>
               )}
+
+              {/* Rename section (admins) */}
               {isAdmin && (
                 <>
-                  <Text style={[styles.infoBody, { marginTop: 10 }]}>
-                    Rename group
-                  </Text>
-                  <TextInput
+                  <Text style={[styles.sectionTitle]}>Rename group</Text>
+                  <View
                     style={[
-                      styles.searchInput,
-                      { color: C.text, marginTop: 6 },
+                      styles.searchBar,
+                      { marginTop: 6, marginBottom: 10 },
                     ]}
-                    placeholder="New name"
-                    placeholderTextColor="#6d7d92"
-                    value={renameValue}
-                    onChangeText={setRenameValue}
-                    selectionColor="#3a7afe"
-                  />
-                  <TouchableOpacity
-                    style={[
-                      styles.sendBtn,
-                      { alignSelf: "flex-start", marginTop: 6 },
-                    ]}
-                    onPress={renameGroup}
                   >
-                    <Icon name="save" size={18} color="#fff" />
-                  </TouchableOpacity>
+                    <TextInput
+                      style={[styles.searchInput, { color: C.text }]}
+                      placeholder="New name"
+                      placeholderTextColor="#6d7d92"
+                      value={renameValue}
+                      onChangeText={setRenameValue}
+                      selectionColor="#3a7afe"
+                    />
+                    <TouchableOpacity
+                      style={{
+                        paddingHorizontal: 10,
+                        height: 40,
+                        justifyContent: "center",
+                      }}
+                      onPress={renameGroup}
+                    >
+                      <Icon name="save" size={18} color={C.accent} />
+                    </TouchableOpacity>
+                  </View>
                 </>
               )}
-              <Text style={[styles.infoBody, { marginTop: 12 }]}>Members</Text>
-              <FlatList
-                data={groupInfo.members || []}
-                keyExtractor={(m) => m.member_email}
-                style={{ maxHeight: 220, marginTop: 6 }}
-                renderItem={({ item }) => {
-                  const isItemAdmin =
-                    !!item.is_admin ||
-                    item.member_email === groupInfo.group?.owner_email;
-                  return (
-                    <View
-                      style={[
-                        styles.contactRow,
-                        { backgroundColor: "transparent" },
-                      ]}
-                    >
-                      <View
-                        style={[styles.avatar, { backgroundColor: "#2a3c52" }]}
-                      >
-                        <Text style={styles.avatarTxt}>
-                          {item.member_email.slice(0, 2).toUpperCase()}
-                        </Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.email}>{item.member_email}</Text>
-                        <Text style={styles.preview}>
-                          {isItemAdmin ? "Admin" : "Member"}
-                        </Text>
-                      </View>
-                      {isAdmin && item.member_email !== userEmail && (
-                        <>
-                          <TouchableOpacity
-                            onPress={() =>
-                              toggleAdmin(item.member_email, !isItemAdmin)
-                            }
-                            style={{ marginRight: 10 }}
-                          >
-                            <Icon
-                              name="admin-panel-settings"
-                              size={18}
-                              color={isItemAdmin ? "#ffb74d" : "#66d38a"}
-                            />
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            onPress={() => removeMember(item.member_email)}
-                          >
-                            <Icon
-                              name="person-remove"
-                              size={18}
-                              color="#ff6b6b"
-                            />
-                          </TouchableOpacity>
-                        </>
-                      )}
-                    </View>
-                  );
-                }}
-                ListEmptyComponent={
-                  <View style={{ padding: 8 }}>
-                    <Text style={{ color: C.sub, fontSize: 12 }}>
-                      No members
-                    </Text>
-                  </View>
-                }
-              />
+
+              {/* Add member (admins) */}
               {isAdmin && (
                 <>
-                  <Text style={[styles.infoBody, { marginTop: 10 }]}>
+                  <Text style={[styles.sectionTitle, { marginTop: 10 }]}>
                     Add member
                   </Text>
-                  <View style={[styles.searchBar, { marginTop: 6 }]}>
+                  <View
+                    style={[
+                      styles.searchBar,
+                      { marginTop: 6, marginBottom: 10 },
+                    ]}
+                  >
                     <TextInput
                       style={[styles.searchInput, { color: C.text }]}
                       placeholder="email@example.com"
@@ -1091,11 +1060,89 @@ export default function CommunitiesScreen() {
                   </View>
                 </>
               )}
+
+              {/* Members list (scrollable area) */}
+              <Text style={[styles.sectionTitle, { marginTop: 12 }]}>
+                Members
+              </Text>
+              <View style={{ maxHeight: 360, marginTop: 6 }}>
+                <FlatList
+                  data={groupInfo.members || []}
+                  keyExtractor={(m) => m.member_email}
+                  renderItem={({ item }) => {
+                    const isItemAdmin =
+                      !!item.is_admin ||
+                      item.member_email === groupInfo.group?.owner_email;
+                    return (
+                      <View
+                        style={[
+                          styles.contactRow,
+                          {
+                            backgroundColor: "transparent",
+                            paddingVertical: 10,
+                          },
+                        ]}
+                      >
+                        <View
+                          style={[
+                            styles.avatar,
+                            { backgroundColor: "#2a3c52", marginRight: 12 },
+                          ]}
+                        >
+                          <Text style={styles.avatarTxt}>
+                            {item.member_email.slice(0, 2).toUpperCase()}
+                          </Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.email}>{item.member_email}</Text>
+                          <Text style={styles.preview}>
+                            {isItemAdmin ? "Admin" : "Member"}
+                          </Text>
+                        </View>
+                        {isAdmin && item.member_email !== userEmail && (
+                          <>
+                            <TouchableOpacity
+                              onPress={() =>
+                                toggleAdmin(item.member_email, !isItemAdmin)
+                              }
+                              style={{ marginRight: 10 }}
+                            >
+                              <Icon
+                                name="admin-panel-settings"
+                                size={18}
+                                color={isItemAdmin ? "#ffb74d" : "#66d38a"}
+                              />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              onPress={() => removeMember(item.member_email)}
+                            >
+                              <Icon
+                                name="person-remove"
+                                size={18}
+                                color="#ff6b6b"
+                              />
+                            </TouchableOpacity>
+                          </>
+                        )}
+                      </View>
+                    );
+                  }}
+                  ListEmptyComponent={
+                    <View style={{ padding: 8 }}>
+                      <Text style={{ color: C.sub, fontSize: 12 }}>
+                        No members
+                      </Text>
+                    </View>
+                  }
+                />
+              </View>
+
+              {/* Actions */}
               <View
                 style={{
                   flexDirection: "row",
                   justifyContent: "flex-end",
-                  marginTop: 10,
+                  marginTop: 12,
                 }}
               >
                 <TouchableOpacity
@@ -1405,18 +1452,32 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.5)",
   },
   infoCard: {
+    // CHANGED: make the settings card broader and taller
     position: "absolute",
-    left: 26,
-    right: 26,
-    top: "28%",
+    left: 16,
+    right: 16,
+    top: "8%",
+    bottom: "6%",
     backgroundColor: C.card,
-    padding: 20,
-    borderRadius: 16,
+    padding: 16,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: "#24425f",
   },
+  infoHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
   infoTitle: { color: C.text, fontSize: 16, fontWeight: "700" },
   infoBody: { color: C.sub, fontSize: 13, lineHeight: 18, marginTop: 8 },
+  sectionTitle: {
+    color: C.text,
+    fontSize: 13,
+    fontWeight: "700",
+    marginTop: 6,
+  },
   successNote: {
     color: "#4cc790",
     fontSize: 11,
