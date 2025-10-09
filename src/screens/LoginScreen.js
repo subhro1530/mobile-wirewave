@@ -13,32 +13,51 @@ import {
 } from "react-native";
 import Icon from "react-native-vector-icons/MaterialIcons";
 import { AuthContext } from "../AuthContext";
+import API from "../api"; // use axios instance for optional profile fetch
 
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [banner, setBanner] = useState(null); // { type: 'success'|'error', msg: string }
   const { login } = useContext(AuthContext);
 
   const handleLogin = async () => {
     if (!email || !password) {
-      Alert.alert("Error", "Please fill in all fields");
+      setBanner({ type: "error", msg: "Please fill in all fields" });
       return;
     }
     try {
-      const res = await fetch("https://wirewaveapi.onrender.com/login", {
+      const isEmail = email.includes("@");
+      const res = await fetch("http://65.20.73.50:4000/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify(
+          isEmail ? { email, password } : { userid: email, password }
+        ),
       });
       const data = await res.json();
-      if (res.ok) {
-        // API may return token + user info; fallback to entered email
-        login(data.token, data.email || email);
+      if (res.ok && data?.token) {
+        // optimistic email source
+        let loginEmail = isEmail ? email : data.email || "";
+        // store token (and a best-effort email)
+        await login(data.token, loginEmail);
+        setBanner({ type: "success", msg: "Login successful" });
+        // If user logged in by userid and email not returned, try to fetch profile email
+        if (!isEmail && !data.email) {
+          try {
+            const me = await API.get("/profile");
+            if (me?.data?.email) {
+              await login(data.token, me.data.email); // update stored email
+            }
+          } catch {
+            // ignore; app will still work with userid until messages load
+          }
+        }
       } else {
-        Alert.alert("Error", data.error || "Login failed");
+        setBanner({ type: "error", msg: data?.error || "Login failed" });
       }
     } catch (err) {
-      Alert.alert("Error", err.message);
+      setBanner({ type: "error", msg: err.message });
     }
   };
 
@@ -55,13 +74,37 @@ export default function LoginScreen({ navigation }) {
           style={styles.logo}
           resizeMode="contain"
         />
+        {!!banner && (
+          <View
+            style={[
+              styles.banner,
+              banner.type === "success"
+                ? styles.bannerSuccess
+                : styles.bannerError,
+            ]}
+          >
+            <Icon
+              name={
+                banner.type === "success" ? "check-circle" : "error-outline"
+              }
+              size={16}
+              color="#fff"
+              style={{ marginRight: 8 }}
+            />
+            <Text style={styles.bannerTxt}>{banner.msg}</Text>
+          </View>
+        )}
         <TextInput
           style={styles.input}
-          placeholder="Email"
+          placeholder="Email or Username"
           placeholderTextColor="#999"
-          onChangeText={setEmail}
+          onChangeText={(t) => {
+            setEmail(t);
+            if (banner) setBanner(null);
+          }}
           value={email}
           selectionColor="#3a7afe"
+          autoCapitalize="none"
         />
         <TextInput
           style={styles.input}
@@ -153,4 +196,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginLeft: 6,
   },
+  banner: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    marginBottom: 12,
+    alignSelf: "stretch",
+  },
+  bannerSuccess: {
+    backgroundColor: "#1d3d55",
+    borderWidth: 1,
+    borderColor: "#2e5d7d",
+  },
+  bannerError: {
+    backgroundColor: "#552222",
+    borderWidth: 1,
+    borderColor: "#7d3a3a",
+  },
+  bannerTxt: { color: "#fff", fontSize: 12, flexShrink: 1 },
 });

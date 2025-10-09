@@ -15,28 +15,46 @@ import Icon from "react-native-vector-icons/MaterialIcons";
 
 export default function RegisterScreen({ navigation }) {
   const [email, setEmail] = useState("");
+  const [userid, setUserid] = useState("");
   const [password, setPassword] = useState("");
+  const [banner, setBanner] = useState(null);
 
   const handleRegister = async () => {
-    if (!email || !password) {
-      Alert.alert("Error", "Please fill in all fields");
+    if (!email || !password || !userid) {
+      setBanner({ type: "error", msg: "Please fill in all fields" });
       return;
     }
     try {
-      const res = await fetch("https://wirewaveapi.onrender.com/register", {
+      const res = await fetch("http://65.20.73.50:4000/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, userid }),
       });
-      const data = await res.json();
-      if (res.ok) {
-        Alert.alert("Success", "Account created. You can login now.");
-        navigation.navigate("Login");
-      } else {
-        Alert.alert("Error", data.error || "Registration failed");
+      let data = null;
+      try {
+        data = await res.json();
+      } catch {
+        // ignore JSON parse errors; fall back to generic messages
       }
+
+      if (res.ok) {
+        setBanner({
+          type: "success",
+          msg: "Account created successfully. Please login.",
+        });
+        setTimeout(() => navigation.navigate("Login"), 900);
+        return;
+      }
+
+      // Non-2xx: show server-provided reason (email/user exists, etc.)
+      const serverMsg =
+        (data && (data.error || data.message || data.detail)) ||
+        (res.status === 409
+          ? "Email or username already exists"
+          : "Registration failed");
+      setBanner({ type: "error", msg: serverMsg });
     } catch (err) {
-      Alert.alert("Error", err.message);
+      setBanner({ type: "error", msg: err.message || "Network error" });
     }
   };
 
@@ -53,20 +71,60 @@ export default function RegisterScreen({ navigation }) {
           style={styles.logo}
           resizeMode="contain"
         />
+        {!!banner && (
+          <View
+            style={[
+              styles.banner,
+              banner.type === "success"
+                ? styles.bannerSuccess
+                : styles.bannerError,
+            ]}
+          >
+            <Icon
+              name={
+                banner.type === "success" ? "check-circle" : "error-outline"
+              }
+              size={16}
+              color="#fff"
+              style={{ marginRight: 8 }}
+            />
+            <Text style={styles.bannerTxt}>{banner.msg}</Text>
+          </View>
+        )}
         <TextInput
           style={styles.input}
           placeholder="Email"
           placeholderTextColor="#999"
-          onChangeText={setEmail}
+          onChangeText={(t) => {
+            setEmail(t);
+            if (banner) setBanner(null);
+          }}
           value={email}
           selectionColor="#3a7afe"
+          autoCapitalize="none"
+          keyboardType="email-address"
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Username"
+          placeholderTextColor="#999"
+          onChangeText={(t) => {
+            setUserid(t);
+            if (banner) setBanner(null);
+          }}
+          value={userid}
+          selectionColor="#3a7afe"
+          autoCapitalize="none"
         />
         <TextInput
           style={styles.input}
           placeholder="Password"
           placeholderTextColor="#999"
           secureTextEntry
-          onChangeText={setPassword}
+          onChangeText={(t) => {
+            setPassword(t);
+            if (banner) setBanner(null);
+          }}
           value={password}
           selectionColor="#3a7afe"
         />
@@ -155,4 +213,24 @@ const styles = StyleSheet.create({
     color: "#aaa",
     marginTop: 10,
   },
+  banner: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    marginBottom: 12,
+    alignSelf: "stretch",
+  },
+  bannerSuccess: {
+    backgroundColor: "#1d3d55",
+    borderWidth: 1,
+    borderColor: "#2e5d7d",
+  },
+  bannerError: {
+    backgroundColor: "#552222",
+    borderWidth: 1,
+    borderColor: "#7d3a3a",
+  },
+  bannerTxt: { color: "#fff", fontSize: 12, flexShrink: 1 },
 });

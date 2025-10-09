@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const API = axios.create({
-  baseURL: "https://wirewaveapi.onrender.com",
+  baseURL: "http://65.20.73.50:4000", // updated
 });
 
 // Attach token automatically
