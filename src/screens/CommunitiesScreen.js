@@ -45,6 +45,7 @@ export default function CommunitiesScreen() {
   const [showInfo, setShowInfo] = useState(false);
   const [broadcastVisible, setBroadcastVisible] = useState(false); // NEW (replaces always-on UI)
   const [lastBroadcastInfo, setLastBroadcastInfo] = useState(null); // { at: Date, count: number }
+  const [enhancing, setEnhancing] = useState(false); // NEW
 
   const authHdr = userToken
     ? { Authorization: `Bearer ${userToken}` }
@@ -132,6 +133,34 @@ export default function CommunitiesScreen() {
       setSending(false);
     }
   };
+
+  const enhanceBroadcast = useCallback(async () => {
+    const draft = content.trim();
+    if (!draft || enhancing) return;
+    setEnhancing(true);
+    try {
+      const payload = {
+        text:
+          "pls improve this sentence ok, just give the enhanced version without any words from you here is the text: " +
+          draft,
+      };
+      const { data } = await API.post("/ai/enhance-chat", payload, {
+        headers: authHdr,
+      });
+      const out = (data?.enhanced || "").toString().trim();
+      if (out) setContent(out);
+    } catch (e) {
+      Alert.alert(
+        "Error",
+        e?.response?.data?.error ||
+          e?.response?.data?.message ||
+          e.message ||
+          "Enhance failed"
+      );
+    } finally {
+      setEnhancing(false);
+    }
+  }, [content, enhancing, authHdr]);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -277,6 +306,21 @@ export default function CommunitiesScreen() {
               onChangeText={setContent}
               selectionColor="#3a7afe"
             />
+            {/* NEW: Enhance button (bw icon) */}
+            <TouchableOpacity
+              style={[
+                styles.aiBtn,
+                (!content.trim() || enhancing) && { opacity: 0.45 },
+              ]}
+              disabled={!content.trim() || enhancing}
+              onPress={enhanceBroadcast}
+            >
+              {enhancing ? (
+                <ActivityIndicator color="#9ab1c1" size="small" />
+              ) : (
+                <Icon name="auto-awesome" size={20} color="#9ab1c1" />
+              )}
+            </TouchableOpacity>
             <TouchableOpacity
               style={[
                 styles.sendBtn,
@@ -403,6 +447,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     maxHeight: 110,
     paddingVertical: 4,
+  },
+  aiBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 6,
   },
   sendBtn: {
     width: 40,

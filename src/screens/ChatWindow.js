@@ -62,6 +62,7 @@ export default function ChatWindowScreen() {
   const authHdr = userToken
     ? { Authorization: `Bearer ${userToken}` }
     : undefined;
+  const [enhancing, setEnhancing] = useState(false); // NEW
 
   const loadMessages = useCallback(async () => {
     try {
@@ -495,6 +496,38 @@ export default function ChatWindowScreen() {
     return "online";
   })();
 
+  const enhanceText = useCallback(async () => {
+    const draft = text.trim();
+    if (!draft || enhancing) return;
+    setEnhancing(true);
+    try {
+      // Use the exact prompt pattern requested, appending the user's draft
+      const payload = {
+        text:
+          "pls improve this sentence ok, just give the enhanced version without any words from you here is the text: " +
+          draft,
+      };
+      const { data } = await API.post("/ai/enhance-chat", payload, {
+        headers: authHdr,
+      });
+      const out = (data?.enhanced || "").toString().trim();
+      if (out) {
+        setText(out);
+      } else {
+        showToast("No enhancement returned", "error");
+      }
+    } catch (e) {
+      const msg =
+        e?.response?.data?.error ||
+        e?.response?.data?.message ||
+        e?.message ||
+        "Enhance failed";
+      showToast(msg, "error");
+    } finally {
+      setEnhancing(false);
+    }
+  }, [text, enhancing, authHdr, showToast]);
+
   return (
     <View style={styles.root}>
       {/* Outside overlay for dropdown */}
@@ -611,13 +644,13 @@ export default function ChatWindowScreen() {
           ]}
         >
           <View style={styles.inputRow}>
-            {/* Emoji button updated to match gallery button style */}
             <TouchableOpacity
               style={styles.iconSmall}
               onPress={() => setEmojiVisible(true)}
             >
               <Icon name="emoji-emotions" size={22} color="#8696a0" />
             </TouchableOpacity>
+
             <TextInput
               style={styles.input}
               placeholder="Message"
@@ -627,6 +660,20 @@ export default function ChatWindowScreen() {
               multiline
               selectionColor="#3a7afe"
             />
+
+            {/* NEW: Enhance (sparkles) button just left of the attachment icon */}
+            <TouchableOpacity
+              style={styles.iconSmall}
+              onPress={enhanceText}
+              disabled={!text.trim() || enhancing}
+            >
+              {enhancing ? (
+                <ActivityIndicator size="small" color="#8696a0" />
+              ) : (
+                <Icon name="auto-awesome" size={22} color="#8696a0" />
+              )}
+            </TouchableOpacity>
+
             <TouchableOpacity
               style={styles.iconSmall}
               onPress={() => setShareVisible(true)}
