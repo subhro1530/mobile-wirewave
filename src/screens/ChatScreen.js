@@ -41,7 +41,9 @@ const PALETTE = {
 
 export default function ChatScreen() {
   const { userEmail, logout, userToken } = useContext(AuthContext); // ADDED userToken
-  const authHdr = userToken ? { Authorization: `Bearer ${userToken}` } : undefined; // ADDED
+  const authHdr = userToken
+    ? { Authorization: `Bearer ${userToken}` }
+    : undefined; // ADDED
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);

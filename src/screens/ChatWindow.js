@@ -59,7 +59,9 @@ export default function ChatWindowScreen() {
   const [contactLastSeen, setContactLastSeen] = useState(null); // NEW
   const toastRef = useRef(null);
   const chatRef = useRef(null);
-  const authHdr = userToken ? { Authorization: `Bearer ${userToken}` } : undefined;
+  const authHdr = userToken
+    ? { Authorization: `Bearer ${userToken}` }
+    : undefined;
 
   const loadMessages = useCallback(async () => {
     try {
