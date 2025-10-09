@@ -54,6 +54,7 @@ function AssistantScreen() {
   ]);
   const [input, setInput] = React.useState("");
   const [busy, setBusy] = React.useState(false);
+  const [enhancing, setEnhancing] = React.useState(false); // NEW
 
   const send = React.useCallback(async () => {
     const q = input.trim();
@@ -95,6 +96,29 @@ function AssistantScreen() {
       setBusy(false);
     }
   }, [input, busy, authHdr]);
+
+  // NEW: enhance current input using the same pattern as chats
+  const enhanceInput = React.useCallback(async () => {
+    const draft = (input || "").trim();
+    if (!draft || enhancing) return;
+    setEnhancing(true);
+    try {
+      const payload = {
+        text:
+          "pls improve this sentence ok, just give the enhanced version without any words from you here is the text: " +
+          draft,
+      };
+      const { data } = await API.post("/ai/enhance-chat", payload, {
+        headers: authHdr,
+      });
+      const out = (data?.enhanced || "").toString().trim();
+      if (out) setInput(out);
+    } catch {
+      // silent; keep UX simple in assistant input
+    } finally {
+      setEnhancing(false);
+    }
+  }, [input, enhancing, authHdr]);
 
   return (
     <View style={{ flex: 1, backgroundColor: "#0b141a" }}>
@@ -189,6 +213,26 @@ function AssistantScreen() {
           selectionColor="#3a7afe"
           multiline
         />
+        {/* NEW: Enhance button (auto-awesome) */}
+        <TouchableOpacity
+          onPress={enhanceInput}
+          disabled={!input.trim() || enhancing}
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 20,
+            alignItems: "center",
+            justifyContent: "center",
+            marginLeft: 6,
+            opacity: !input.trim() || enhancing ? 0.5 : 1,
+          }}
+        >
+          {enhancing ? (
+            <ActivityIndicator color="#9ab1c1" size="small" />
+          ) : (
+            <Icon name="auto-awesome" size={20} color="#9ab1c1" />
+          )}
+        </TouchableOpacity>
         <TouchableOpacity
           onPress={send}
           disabled={busy || !input.trim()}
