@@ -106,7 +106,12 @@ function AssistantScreen() {
       <FlatList
         data={items}
         keyExtractor={(m) => m.id}
-        contentContainerStyle={{ padding: 14, paddingBottom: 100 }}
+        // leave space for top notification dropdown
+        contentContainerStyle={{
+          paddingTop: (StatusBar.currentHeight || 0) + 12,
+          paddingHorizontal: 14,
+          paddingBottom: 100,
+        }}
         renderItem={({ item }) => {
           const isBot = item.role === "bot";
           return (
@@ -230,16 +235,17 @@ function MainTabs() {
         tabBarIcon: ({ color, size }) => {
           if (route.name === "Chats")
             return <Icon name="chat" color={color} size={size} />;
-          if (route.name === "Updates")
-            return <Icon name="auto-awesome" color={color} size={size} />; // CHANGED
+          if (route.name === "Assistant")
+            return <Icon name="auto-awesome" color={color} size={size} />; // CHANGED: keep icon
           if (route.name === "Groups")
-            return <Icon name="groups" color={color} size={size} />; // CHANGED label
+            return <Icon name="groups" color={color} size={size} />;
           return null;
         },
       })}
     >
       <Tab.Screen name="Chats" component={ChatScreen} />
-      <Tab.Screen name="Updates" component={AssistantScreen} />
+      {/* CHANGED: rename Updates -> Assistant */}
+      <Tab.Screen name="Assistant" component={AssistantScreen} />
       <Tab.Screen name="Groups" component={CommunitiesScreen} />
     </Tab.Navigator>
   );
