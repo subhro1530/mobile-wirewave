@@ -55,8 +55,8 @@ export default function ChatWindowScreen() {
   const [emojiVisible, setEmojiVisible] = useState(false); // replaces showEmoji panel
   const [shareVisible, setShareVisible] = useState(false); // FIX: added missing state
   const [toast, setToast] = useState(null); // {msg,type}
-  const [contactOnline, setContactOnline] = useState(false); // NEW
-  const [contactLastSeen, setContactLastSeen] = useState(null); // NEW
+  const [contactOnline, setContactOnline] = useState(false);
+  const [contactLastSeen, setContactLastSeen] = useState(null);
   const toastRef = useRef(null);
   const chatRef = useRef(null);
   const authHdr = userToken
@@ -451,7 +451,7 @@ export default function ChatWindowScreen() {
     return () => clearInterval(t);
   }, [authHdr]);
 
-  // NEW: presence lookup for this contact
+  // Presence lookup with window_seconds guard
   useEffect(() => {
     let cancelled = false;
     const fetchPresence = async () => {
@@ -461,12 +461,16 @@ export default function ChatWindowScreen() {
           { headers: authHdr }
         );
         if (!cancelled) {
-          setContactOnline(!!data?.online);
+          const winMs = (data?.window_seconds ?? 60) * 1000;
+          const seenMs = data?.last_seen
+            ? new Date(data.last_seen).getTime()
+            : 0;
+          const withinWindow = seenMs ? Date.now() - seenMs <= winMs : true;
+          const isOnline = !!data?.online && withinWindow;
+          setContactOnline(isOnline);
           setContactLastSeen(data?.last_seen || null);
         }
-      } catch {
-        /* ignore */
-      }
+      } catch {}
     };
     fetchPresence();
     const i = setInterval(fetchPresence, 20000);
@@ -476,10 +480,20 @@ export default function ChatWindowScreen() {
     };
   }, [contact, authHdr]);
 
-  // helper to show last seen nicely (fallback to locale string)
-  const lastSeenText = contactLastSeen
-    ? `last seen ${new Date(contactLastSeen).toLocaleString()}`
-    : "last seen unknown";
+  // Relative formatter
+  const lastSeenText = (() => {
+    if (!contactOnline) {
+      if (!contactLastSeen) return "offline";
+      const diff = Date.now() - new Date(contactLastSeen).getTime();
+      const m = Math.floor(diff / 60000);
+      const h = Math.floor(diff / 3600000);
+      if (m < 1) return "last seen just now";
+      if (m < 60) return `last seen ${m} min ago`;
+      if (h < 24) return `last seen ${h} hr${h > 1 ? "s" : ""} ago`;
+      return `last seen ${new Date(contactLastSeen).toLocaleString()}`;
+    }
+    return "online";
+  })();
 
   return (
     <View style={styles.root}>
@@ -520,7 +534,7 @@ export default function ChatWindowScreen() {
             {contact}
           </Text>
           <Text style={styles.contactSub} numberOfLines={1}>
-            {contactOnline ? "online" : lastSeenText}
+            {lastSeenText}
           </Text>
         </View>
         <TouchableOpacity style={styles.iconBtn}>

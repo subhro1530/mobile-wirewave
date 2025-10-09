@@ -804,8 +804,14 @@ export default function ChatScreen() {
           ).length;
           const starred = starredChats.has(item.email);
           const avatar = contactAvatars[item.email];
-          const pres = contactPresence[item.email]; // NEW
-          const isOnline = !!pres?.online; // NEW
+          const pres = contactPresence[item.email];
+          const winMs = (pres?.window_seconds ?? 60) * 1000;
+          const seenMs = pres?.last_seen
+            ? new Date(pres.last_seen).getTime()
+            : 0;
+          const withinWindow = seenMs ? Date.now() - seenMs <= winMs : true;
+          const isOnline = !!pres?.online && withinWindow;
+
           return (
             <View style={styles.row}>
               <TouchableOpacity
@@ -836,7 +842,7 @@ export default function ChatScreen() {
                   <Text style={styles.name} numberOfLines={1}>
                     {item.email}
                   </Text>
-                  {isOnline && <View style={styles.onlineDot} />} {/* NEW */}
+                  {isOnline && <View style={styles.onlineDot} />}
                   <View style={{ flexDirection: "row", alignItems: "center" }}>
                     {starred && (
                       <Icon

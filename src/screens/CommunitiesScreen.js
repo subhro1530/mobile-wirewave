@@ -147,7 +147,7 @@ export default function CommunitiesScreen() {
           style={styles.iconBtn}
           onPress={() => setBroadcastVisible(true)}
         >
-          <Icon name="campaign" size={20} color="#fff" /> {/* was mic */}
+          <Icon name="campaign" size={20} color="#fff" />
         </TouchableOpacity>
       </View>
 
