@@ -45,7 +45,6 @@ export default function ChatWindowScreen() {
   const [allMessages, setAllMessages] = useState([]);
   const [loadingSend, setLoadingSend] = useState(false);
   const [text, setText] = useState("");
-  const [keyboardOffset, setKeyboardOffset] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileVisible, setProfileVisible] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -63,6 +62,7 @@ export default function ChatWindowScreen() {
     ? { Authorization: `Bearer ${userToken}` }
     : undefined;
   const [enhancing, setEnhancing] = useState(false); // NEW
+  const [kbVisible, setKbVisible] = useState(false); // NEW
 
   const loadMessages = useCallback(async () => {
     try {
@@ -142,13 +142,14 @@ export default function ChatWindowScreen() {
     }
   }, [text, contact, loadMessages, authHdr]);
 
+  // Replace keyboard listeners: only track visibility and keep auto-scroll
   useEffect(() => {
-    const showSub = Keyboard.addListener("keyboardDidShow", (e) => {
-      setKeyboardOffset(e.endCoordinates.height);
+    const showSub = Keyboard.addListener("keyboardDidShow", () => {
+      setKbVisible(true);
       setTimeout(() => chatRef.current?.scrollToBottom?.(), 80);
     });
     const hideSub = Keyboard.addListener("keyboardDidHide", () => {
-      setKeyboardOffset(0);
+      setKbVisible(false);
     });
     return () => {
       showSub.remove();
@@ -622,9 +623,9 @@ export default function ChatWindowScreen() {
       )}
 
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"} // CHANGED
         style={{ flex: 1 }}
-        keyboardVerticalOffset={0}
+        keyboardVerticalOffset={0} // CHANGED: no extra offset; custom header already inside screen
       >
         <ChatWindow
           ref={chatRef}
@@ -633,14 +634,14 @@ export default function ChatWindowScreen() {
           currentUserEmail={userEmail}
           onRefresh={loadMessages}
           onClear={() => {}}
-          bottomInset={emojiVisible ? 320 : 70}
+          bottomInset={emojiVisible && !kbVisible ? 320 : kbVisible ? 0 : 70} // CHANGED: avoid double raise when keyboard open
         />
 
         {/* Composer */}
         <View
           style={[
             styles.composerWrap,
-            { marginBottom: Platform.OS === "android" ? keyboardOffset : 0 },
+            // { marginBottom: Platform.OS === "android" ? keyboardOffset : 0 }, // REMOVE
           ]}
         >
           <View style={styles.inputRow}>
