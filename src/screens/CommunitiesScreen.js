@@ -79,6 +79,7 @@ export default function CommunitiesScreen() {
   // Group chat composer extras (emoji/share)
   const [groupEmojiVisible, setGroupEmojiVisible] = useState(false); // NEW
   const [groupShareVisible, setGroupShareVisible] = useState(false); // NEW
+  const [groupLocSending, setGroupLocSending] = useState(false); // NEW
 
   // Refs to control polling/throttling
   const groupsTimerRef = useRef(null); // NEW
@@ -612,6 +613,71 @@ export default function CommunitiesScreen() {
     else parent.setOptions({ tabBarStyle: undefined });
   }, [navigation, activeGroupId]); // ADDED
 
+  // NEW: share current location to the active group as a Google Maps link
+  const shareGroupLocation = useCallback(async () => {
+    if (!activeGroupId || groupLocSending) return;
+    setGroupLocSending(true);
+    try {
+      let coords = null;
+
+      // Try expo-location if available
+      try {
+        const Location = await import("expo-location");
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === "granted") {
+          const pos = await Location.getCurrentPositionAsync({});
+          coords = {
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+          };
+        }
+      } catch {
+        // Fallback to navigator.geolocation
+      }
+
+      if (!coords && global?.navigator?.geolocation) {
+        await new Promise((resolve) => {
+          navigator.geolocation.getCurrentPosition(
+            (pos) => {
+              coords = {
+                latitude: pos.coords.latitude,
+                longitude: pos.coords.longitude,
+              };
+              resolve();
+            },
+            () => resolve(),
+            { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+          );
+        });
+      }
+
+      if (!coords) {
+        Alert.alert(
+          "Location",
+          "Unable to get your location. Please enable location permissions."
+        );
+        return;
+      }
+
+      const url = `https://www.google.com/maps/search/?api=1&query=${coords.latitude},${coords.longitude}`;
+      const content = `📍 My location: ${url}`;
+      const { data } = await API.post(
+        `/groups/${encodeURIComponent(activeGroupId)}/messages`,
+        { content },
+        { headers: authHdr }
+      );
+      if (data && data.id) setGroupMsgs((p) => [...p, data]);
+      setGroupShareVisible(false);
+    } catch (e) {
+      Alert.alert(
+        "Error",
+        e?.response?.data?.error || e?.message || "Share failed"
+      );
+    } finally {
+      setGroupLocSending(false);
+    }
+  }, [activeGroupId, authHdr, groupLocSending]); // NEW
+
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar
@@ -861,16 +927,16 @@ export default function CommunitiesScreen() {
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.shareItem}
-                  onPress={() =>
-                    Alert.alert("Info", "Location sharing not implemented")
-                  }
+                  onPress={shareGroupLocation} // CHANGED
                 >
                   <View
                     style={[styles.shareIcon, { backgroundColor: "#17a884" }]}
                   >
                     <Icon name="place" size={20} color="#fff" />
                   </View>
-                  <Text style={styles.preview}>Location</Text>
+                  <Text style={styles.preview}>
+                    {groupLocSending ? "Sharing..." : "Location"}
+                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.shareItem, { backgroundColor: "#444f5d" }]}

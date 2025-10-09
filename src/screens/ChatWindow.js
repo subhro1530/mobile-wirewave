@@ -68,6 +68,7 @@ export default function ChatWindowScreen() {
   const [msgActionVisible, setMsgActionVisible] = useState(false); // NEW
   const [targetMsg, setTargetMsg] = useState(null); // NEW
   const [refreshing, setRefreshing] = useState(false); // NEW
+  const [locSending, setLocSending] = useState(false); // NEW
 
   const loadMessages = useCallback(async () => {
     try {
@@ -503,6 +504,70 @@ export default function ChatWindowScreen() {
     }
   }, [authHdr, refreshPresence, loadMessages, refreshing]); // NEW
 
+  // NEW: share current location as a Google Maps link in chat
+  const shareLocation = useCallback(async () => {
+    if (locSending || !contact) return;
+    setLocSending(true);
+    try {
+      let coords = null;
+
+      // Try expo-location if available
+      try {
+        const Location = await import("expo-location");
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === "granted") {
+          const pos = await Location.getCurrentPositionAsync({});
+          coords = {
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+          };
+        }
+      } catch {
+        // Fallback to navigator.geolocation
+      }
+
+      if (!coords && global?.navigator?.geolocation) {
+        await new Promise((resolve) => {
+          navigator.geolocation.getCurrentPosition(
+            (pos) => {
+              coords = {
+                latitude: pos.coords.latitude,
+                longitude: pos.coords.longitude,
+              };
+              resolve();
+            },
+            () => resolve(),
+            { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+          );
+        });
+      }
+
+      if (!coords) {
+        Alert.alert(
+          "Location",
+          "Unable to get your location. Please enable location permissions."
+        );
+        return;
+      }
+
+      const url = `https://www.google.com/maps/search/?api=1&query=${coords.latitude},${coords.longitude}`;
+      const content = `📍 My location: ${url}`;
+      const { data: created } = await API.post(
+        "/messages",
+        { receiver_email: contact, content },
+        { headers: authHdr }
+      );
+      if (created && created.id) setAllMessages((prev) => [...prev, created]);
+      setShareVisible(false);
+      showToast("Location shared");
+      setTimeout(() => chatRef.current?.scrollToBottom?.(), 60);
+    } catch (e) {
+      Alert.alert("Error", e?.message || "Failed to share location");
+    } finally {
+      setLocSending(false);
+    }
+  }, [locSending, contact, authHdr, showToast]); // NEW
+
   return (
     <View style={styles.root}>
       {/* Outside overlay for dropdown */}
@@ -722,107 +787,6 @@ export default function ChatWindowScreen() {
         </Modal>
       </KeyboardAvoidingView>
 
-      {/* Message action modal */}
-      <Modal
-        transparent
-        visible={msgActionVisible}
-        animationType="fade"
-        onRequestClose={() => setMsgActionVisible(false)}
-      >
-        <Pressable
-          style={styles.modalBackdrop}
-          onPress={() => setMsgActionVisible(false)}
-        >
-          <View />
-        </Pressable>
-        <View style={[styles.actionSheet, { bottom: 30 }]}>
-          <Text style={styles.sheetTitle} numberOfLines={2}>
-            {targetMsg?.content || ""}
-          </Text>
-          <TouchableOpacity style={styles.sheetBtn} onPress={toggleStarMessage}>
-            <Icon
-              name={starredIds.has(targetMsg?.id) ? "grade" : "star-border"}
-              size={16}
-              color="#ffd54f"
-              style={{ marginRight: 8 }}
-            />
-            <Text style={styles.sheetBtnTxt}>
-              {starredIds.has(targetMsg?.id)
-                ? "Unstar Message"
-                : "Star Message"}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.sheetBtn} onPress={copyMessage}>
-            <Icon
-              name="content-copy"
-              size={16}
-              color="#9ab1c1"
-              style={{ marginRight: 8 }}
-            />
-            <Text style={styles.sheetBtnTxt}>Copy</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.sheetBtn, { justifyContent: "center" }]}
-            onPress={() => setMsgActionVisible(false)}
-          >
-            <Text style={[styles.sheetBtnTxt, { color: "#8696a0" }]}>
-              Cancel
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </Modal>
-
-      {/* Profile Modal */}
-      <Modal
-        transparent
-        visible={profileVisible}
-        animationType="fade"
-        onRequestClose={() => setProfileVisible(false)}
-      >
-        <Pressable
-          style={styles.modalBackdrop}
-          onPress={() => setProfileVisible(false)}
-        >
-          <View />
-        </Pressable>
-        <View style={styles.profileCard}>
-          {profileLoading ? (
-            <ActivityIndicator color="#3a7afe" />
-          ) : profileError ? (
-            <Text style={{ color: "#f55" }}>{profileError}</Text>
-          ) : profileData ? (
-            <>
-              <Text style={styles.heading}>Name</Text>
-              <Text style={styles.profileNameValue}>
-                {profileData.name || "—"}
-              </Text>
-              <Text style={styles.heading}>About</Text>
-              <Text style={styles.profileAbout}>
-                {profileData.about || "—"}
-              </Text>
-              <Text style={styles.heading}>Email</Text>
-              <Text style={styles.profileMetaLine}>{contact}</Text>
-              <Text style={styles.heading}>Username</Text>
-              <Text style={styles.profileMetaLine}>
-                {profileData.userid || "—"}
-              </Text>
-              <Text style={styles.heading}>Avatar URL</Text>
-              <Text style={styles.profileMetaLine}>
-                {profileData.avatar_url || "—"}
-              </Text>
-            </>
-          ) : (
-            <Text style={{ color: "#ccc" }}>No profile data.</Text>
-          )}
-          <TouchableOpacity
-            onPress={() => setProfileVisible(false)}
-            style={{ alignSelf: "flex-end", marginTop: 16 }}
-          >
-            <Text style={{ color: "#3a7afe", fontWeight: "600" }}>Close</Text>
-          </TouchableOpacity>
-        </View>
-      </Modal>
-
       {/* Share Sheet */}
       <Modal
         transparent
@@ -857,9 +821,7 @@ export default function ChatWindowScreen() {
               label="Location"
               color="#17a884"
               icon="place"
-              onPress={() =>
-                showToast("Location sharing not implemented", "error")
-              }
+              onPress={shareLocation} // CHANGED
             />
             <ShareItem
               label="Contact"
