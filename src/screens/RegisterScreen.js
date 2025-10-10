@@ -25,11 +25,14 @@ export default function RegisterScreen({ navigation }) {
       return;
     }
     try {
-      const res = await fetch("http://65.20.73.50:4000/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, userid }),
-      });
+      const res = await fetch(
+        "https://backend-wirewave.onrender.com/register",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password, userid }),
+        }
+      );
       let data = null;
       try {
         data = await res.json();

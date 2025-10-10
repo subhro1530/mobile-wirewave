@@ -28,7 +28,7 @@ export default function LoginScreen({ navigation }) {
     }
     try {
       const isEmail = email.includes("@");
-      const res = await fetch("http://65.20.73.50:4000/login", {
+      const res = await fetch("https://backend-wirewave.onrender.com/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
