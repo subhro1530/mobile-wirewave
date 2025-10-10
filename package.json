@@ -21,6 +21,7 @@
     "expo-dev-client": "~6.0.12",
     "expo-status-bar": "~3.0.8",
     "react": "19.1.0",
+    "expo-location": "19.0.7",
     "react-native": "0.81.4",
     "react-native-gesture-handler": "^2.16.2",
     "react-native-paper": "^5.14.5",
