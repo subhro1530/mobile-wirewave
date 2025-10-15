@@ -37,6 +37,19 @@ export default function AgentScreen() {
   const geminiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY || "";
   const hfToken =
     process.env.EXPO_PUBLIC_HF_TOKEN || process.env.HF_TOKEN || ""; // NEW
+  const TOP_PAD = (StatusBar.currentHeight || 0) + 12; // NEW: leave space at top
+
+  // Helper: infer mime from uri extension (defaults to octet-stream)
+  const mimeFromUri = (uri) => {
+    if (!uri) return "application/octet-stream";
+    const u = uri.toLowerCase();
+    if (u.endsWith(".wav")) return "audio/wav";
+    if (u.endsWith(".flac")) return "audio/flac";
+    if (u.endsWith(".m4a") || u.endsWith(".mp4")) return "audio/m4a";
+    if (u.endsWith(".mp3")) return "audio/mpeg";
+    if (u.endsWith(".webm")) return "audio/webm";
+    return "application/octet-stream";
+  };
 
   const [items, setItems] = useState([
     {
@@ -280,7 +293,7 @@ export default function AgentScreen() {
     }
   }, [input, enhancing, authHdr]);
 
-  // NEW: Transcribe local audio URI with Hugging Face Inference API (Whisper)
+  // Transcribe local audio URI with Hugging Face Inference API (Whisper)
   const transcribeAudio = useCallback(
     async (uri) => {
       try {
@@ -288,9 +301,9 @@ export default function AgentScreen() {
           append("agent", "ASR not configured (missing Hugging Face token).");
           return "";
         }
-        // Get Blob from local file URI
         const audioResp = await fetch(uri);
         const blob = await audioResp.blob();
+        const contentType = mimeFromUri(uri);
 
         const resp = await fetch(
           "https://api-inference.huggingface.co/models/openai/whisper-large-v3",
@@ -299,12 +312,12 @@ export default function AgentScreen() {
             headers: {
               Authorization: `Bearer ${hfToken}`,
               Accept: "application/json",
+              "Content-Type": contentType, // CHANGED: force audio content-type
             },
-            body: blob, // send raw audio
+            body: blob,
           }
         );
 
-        // HF returns 200 with { text } or a task message
         if (!resp.ok) {
           const errTxt = await resp.text();
           throw new Error(
@@ -328,30 +341,86 @@ export default function AgentScreen() {
     [hfToken, append]
   );
 
-  // Voice record controls
+  // NEW: load a Recording-capable Audio API (prefer expo-audio, fallback expo-av)
+  const loadRecordingAPI = useCallback(async () => {
+    try {
+      const modAudio = await import("expo-audio");
+      if (modAudio?.Audio?.Recording) return modAudio.Audio;
+    } catch {}
+    try {
+      const modAV = await import("expo-av");
+      if (modAV?.Audio?.Recording) return modAV.Audio;
+    } catch {}
+    return null;
+  }, []);
+
+  // Prefer expo-audio; fallback to expo-av. Record as m4a (high quality) to avoid 3gpp.
   const startVoice = useCallback(async () => {
     if (rec || recBusy) return;
     setRecBusy(true);
     try {
-      const { Audio } = await import("expo-av");
-      const { status } = await Audio.requestPermissionsAsync();
-      if (status !== "granted") {
+      const AudioAPI = await loadRecordingAPI();
+      if (!AudioAPI) {
+        append(
+          "agent",
+          "Recording is unavailable. Install expo-av: npx expo install expo-av"
+        );
+        setRecBusy(false);
+        return;
+      }
+
+      // SAFE permission handling
+      let permStatus = "granted";
+      try {
+        if (typeof AudioAPI.getPermissionsAsync === "function") {
+          const res = await AudioAPI.getPermissionsAsync();
+          permStatus = res?.status || permStatus;
+          if (
+            permStatus !== "granted" &&
+            typeof AudioAPI.requestPermissionsAsync === "function"
+          ) {
+            const req = await AudioAPI.requestPermissionsAsync();
+            permStatus = req?.status || "denied";
+          }
+        } else if (typeof AudioAPI.requestPermissionsAsync === "function") {
+          const req = await AudioAPI.requestPermissionsAsync();
+          permStatus = req?.status || "denied";
+        }
+      } catch {
+        // some platforms will prompt implicitly
+      }
+      if (permStatus !== "granted") {
         append("agent", "Microphone permission denied.");
         setRecBusy(false);
         return;
       }
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        interruptionModeAndroid: 1,
-        shouldDuckAndroid: true,
-        staysActiveInBackground: false,
-      });
-      const recording = new Audio.Recording();
-      await recording.prepareToRecordAsync(
-        Audio.RECORDING_OPTIONS_PRESET_HIGH_QUALITY
-      );
+
+      try {
+        if (typeof AudioAPI.setAudioModeAsync === "function") {
+          await AudioAPI.setAudioModeAsync({
+            allowsRecordingIOS: true,
+            playsInSilentModeIOS: true,
+            interruptionModeAndroid: 1,
+            shouldDuckAndroid: true,
+            staysActiveInBackground: false,
+          });
+        }
+      } catch {}
+
+      const RecordingCtor = AudioAPI?.Recording;
+      if (!RecordingCtor) {
+        append("agent", "Recording API unavailable (no Audio.Recording).");
+        setRecBusy(false);
+        return;
+      }
+
+      const recording = new RecordingCtor();
+      const HQ =
+        AudioAPI.RECORDING_OPTIONS_PRESET_HIGH_QUALITY ||
+        AudioAPI.RecordingOptionsPresets?.HIGH_QUALITY;
+      await recording.prepareToRecordAsync(HQ || {});
       await recording.startAsync();
+
       setRec(recording);
       append("agent", "Recording… tap again to stop.");
     } catch (e) {
@@ -359,7 +428,7 @@ export default function AgentScreen() {
     } finally {
       setRecBusy(false);
     }
-  }, [rec, recBusy, append]);
+  }, [rec, recBusy, loadRecordingAPI, append]);
 
   const stopVoice = useCallback(async () => {
     if (!rec || recBusy) return;
@@ -369,9 +438,8 @@ export default function AgentScreen() {
       const uri = rec.getURI();
       setRec(null);
       append("agent", "Transcribing…");
-      const transcript = await transcribeAudio(uri); // CHANGED
+      const transcript = await transcribeAudio(uri);
       if (transcript) {
-        // Prefill the text box with the transcript so user can send/edit
         setInput((prev) => (prev ? `${prev} ${transcript}` : transcript));
         append("agent", `Transcript: "${transcript}"`);
       } else {
@@ -480,42 +548,26 @@ export default function AgentScreen() {
     );
   };
 
-  // Header/navbar
-  const Header = () => (
-    <View
-      style={{
-        height: HEADER_HEIGHT,
-        paddingTop: 4,
-        paddingHorizontal: 12,
-        flexDirection: "row",
-        alignItems: "center",
-        backgroundColor: "#0d1220",
-        borderBottomColor: "#1d2740",
-        borderBottomWidth: 1,
-      }}
-    >
-      <Text style={{ color: "#e9edef", fontSize: 16, fontWeight: "700" }}>
-        Agent
-      </Text>
-    </View>
-  );
+  // Remove header title; add top space via padding only
+  // const Header = () => ( ... )  // REMOVE
 
-  // FIX: Keyboard handling — use 'padding' on iOS, 'height' on Android; safe offset for header only on iOS
-  const kavBehavior = Platform.OS === "ios" ? "padding" : "height"; // CHANGED
-  const kavOffset = Platform.OS === "ios" ? HEADER_HEIGHT : 0; // CHANGED
+  // KeyboardAvoidingView remains (padding iOS, height Android)
+  const kavBehavior = Platform.OS === "ios" ? "padding" : "height";
+  const kavOffset = Platform.OS === "ios" ? 12 : 0; // minimal offset; no title bar
 
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: "#0b141a" }}
-      behavior={kavBehavior} // CHANGED
-      keyboardVerticalOffset={kavOffset} // CHANGED
+      behavior={kavBehavior}
+      keyboardVerticalOffset={kavOffset}
     >
       <StatusBar
         translucent
         backgroundColor="transparent"
         barStyle="light-content"
       />
-      <Header />
+      {/* Top spacer instead of title */}
+      <View style={{ height: TOP_PAD }} /> {/* NEW */}
       <View style={{ flex: 1 }}>
         <FlatList
           data={items}
@@ -523,14 +575,13 @@ export default function AgentScreen() {
           contentContainerStyle={{
             paddingTop: 8,
             paddingHorizontal: 14,
-            paddingBottom: 8, // CHANGED: no large spacer needed since composer is in-flow
+            paddingBottom: 8, // composer is in-flow
           }}
           renderItem={renderItem}
           keyboardShouldPersistTaps="handled"
         />
       </View>
-
-      {/* Composer now sits in normal flow at bottom (not absolute) */}
+      {/* Composer in normal flow at bottom */}
       <View style={styles.composer}>
         <TextInput
           style={styles.input}
@@ -598,7 +649,7 @@ const styles = StyleSheet.create({
   userBubble: { backgroundColor: "#223b53", borderColor: "#2c4f6d" },
   text: { color: "#e9edef", fontSize: 13, lineHeight: 20 },
   composer: {
-    // CHANGED: remove absolute positioning; make it a normal bottom bar
+    // in-flow bottom bar (no absolute)
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#182a3b",
@@ -607,8 +658,8 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     paddingHorizontal: 10,
     paddingVertical: 6,
-    margin: 12, // NEW: spacing from edges
-    marginTop: 0, // NEW
+    margin: 12,
+    marginTop: 0,
   },
   input: { flex: 1, color: "#e9edef", fontSize: 14, paddingVertical: 6 },
   iconBtn: {
