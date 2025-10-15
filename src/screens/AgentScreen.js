@@ -1,4 +1,11 @@
-import React, { useContext, useMemo, useRef, useState } from "react";
+import React, {
+  useContext,
+  useMemo,
+  useRef,
+  useState,
+  useEffect,
+  useCallback,
+} from "react";
 import {
   View,
   Text,
@@ -8,13 +15,17 @@ import {
   ActivityIndicator,
   StatusBar,
   StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import Icon from "react-native-vector-icons/MaterialIcons";
 import { useNavigation } from "@react-navigation/native";
 import { AuthContext } from "../AuthContext";
 import API from "../api";
 
 const CLICK = "#3a7afe";
+const HEADER_HEIGHT = 52;
 
 export default function AgentScreen() {
   const navigation = useNavigation();
@@ -24,6 +35,8 @@ export default function AgentScreen() {
     [userToken]
   );
   const geminiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY || "";
+  const hfToken =
+    process.env.EXPO_PUBLIC_HF_TOKEN || process.env.HF_TOKEN || ""; // NEW
 
   const [items, setItems] = useState([
     {
@@ -35,7 +48,18 @@ export default function AgentScreen() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [sending, setSending] = useState(false);
+  const [enhancing, setEnhancing] = useState(false); // NEW
+  const [lastEmail, setLastEmail] = useState(""); // NEW
+  const [rec, setRec] = useState(null); // NEW: recording handle
+  const [recBusy, setRecBusy] = useState(false); // NEW
   const pendingRef = useRef(null); // { email, message }
+
+  useEffect(() => {
+    (async () => {
+      const saved = await AsyncStorage.getItem("agent:lastEmail");
+      if (saved) setLastEmail(saved);
+    })();
+  }, []);
 
   const append = (role, text, extra = {}) =>
     setItems((p) => [
@@ -148,6 +172,64 @@ export default function AgentScreen() {
     return { email, message, confirm };
   }
 
+  // NEW: detect "list messages" intent and optional target email
+  function isListIntent(text) {
+    return /\b(list|show|fetch)\s+(all\s+)?messages\b/i.test(text);
+  }
+  function extractEmailForList(text) {
+    const m = String(text || "").match(
+      /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i
+    );
+    return m?.[0] || "";
+  }
+
+  // NEW: list messages from API and render a compact summary
+  async function listMessages(targetEmail) {
+    try {
+      const { data } = await API.get("/messages", { headers: authHdr });
+      const all = Array.isArray(data) ? data : [];
+      const recent = targetEmail
+        ? all.filter(
+            (m) =>
+              m.sender_email === targetEmail || m.receiver_email === targetEmail
+          )
+        : all;
+      if (!recent.length) {
+        append(
+          "agent",
+          targetEmail
+            ? `No messages with ${targetEmail}.`
+            : "No messages found."
+        );
+        return;
+      }
+      const last10 = recent
+        .sort(
+          (a, b) =>
+            new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime()
+        )
+        .slice(-10);
+      const lines = last10.map((m) => {
+        const me =
+          m.sender_email && m.sender_email !== targetEmail ? "You" : "They";
+        const t = new Date(m.sent_at).toLocaleString();
+        return `${me} @ ${t}: ${m.content}`;
+      });
+      append(
+        "agent",
+        `Recent messages${targetEmail ? ` with ${targetEmail}` : ""}:\n` +
+          lines.join("\n")
+      );
+    } catch (e) {
+      const msg =
+        e?.response?.data?.error ||
+        e?.response?.data?.message ||
+        e?.message ||
+        "Failed to load messages";
+      append("agent", `Error: ${msg}`);
+    }
+  }
+
   async function confirmAndSend(email, message) {
     setSending(true);
     try {
@@ -156,6 +238,9 @@ export default function AgentScreen() {
         { receiver_email: email, content: message },
         { headers: authHdr }
       );
+      // Persist last email for subsequent sends
+      await AsyncStorage.setItem("agent:lastEmail", email); // NEW
+      setLastEmail(email); // NEW
       append("agent", `Message sent to ${email}.`, {
         action: { type: "openChat", email },
       });
@@ -172,6 +257,130 @@ export default function AgentScreen() {
     }
   }
 
+  // NEW: enhance the current input using backend enhancer
+  const enhanceInput = useCallback(async () => {
+    const draft = (input || "").trim();
+    if (!draft || enhancing) return;
+    setEnhancing(true);
+    try {
+      const payload = {
+        text:
+          "pls improve this sentence ok, just give the enhanced version without any words from you here is the text: " +
+          draft,
+      };
+      const { data } = await API.post("/ai/enhance-chat", payload, {
+        headers: authHdr,
+      });
+      const out = (data?.enhanced || "").toString().trim();
+      if (out) setInput(out);
+    } catch {
+      // silent
+    } finally {
+      setEnhancing(false);
+    }
+  }, [input, enhancing, authHdr]);
+
+  // NEW: Transcribe local audio URI with Hugging Face Inference API (Whisper)
+  const transcribeAudio = useCallback(
+    async (uri) => {
+      try {
+        if (!hfToken) {
+          append("agent", "ASR not configured (missing Hugging Face token).");
+          return "";
+        }
+        // Get Blob from local file URI
+        const audioResp = await fetch(uri);
+        const blob = await audioResp.blob();
+
+        const resp = await fetch(
+          "https://api-inference.huggingface.co/models/openai/whisper-large-v3",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${hfToken}`,
+              Accept: "application/json",
+            },
+            body: blob, // send raw audio
+          }
+        );
+
+        // HF returns 200 with { text } or a task message
+        if (!resp.ok) {
+          const errTxt = await resp.text();
+          throw new Error(
+            `ASR ${resp.status}: ${errTxt?.slice(0, 200) || "Unknown error"}`
+          );
+        }
+        const json = await resp.json();
+        const text =
+          (typeof json === "string" ? json : json?.text || json?.generated_text || "")
+            .toString()
+            .trim();
+        return text;
+      } catch (e) {
+        append("agent", `ASR error: ${e?.message || "transcription failed"}`);
+        return "";
+      }
+    },
+    [hfToken, append]
+  );
+
+  // Voice record controls
+  const startVoice = useCallback(async () => {
+    if (rec || recBusy) return;
+    setRecBusy(true);
+    try {
+      const { Audio } = await import("expo-av");
+      const { status } = await Audio.requestPermissionsAsync();
+      if (status !== "granted") {
+        append("agent", "Microphone permission denied.");
+        setRecBusy(false);
+        return;
+      }
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        interruptionModeAndroid: 1,
+        shouldDuckAndroid: true,
+        staysActiveInBackground: false,
+      });
+      const recording = new Audio.Recording();
+      await recording.prepareToRecordAsync(
+        Audio.RECORDING_OPTIONS_PRESET_HIGH_QUALITY
+      );
+      await recording.startAsync();
+      setRec(recording);
+      append("agent", "Recording… tap again to stop.");
+    } catch (e) {
+      append("agent", e?.message || "Failed to start recording.");
+    } finally {
+      setRecBusy(false);
+    }
+  }, [rec, recBusy, append]);
+
+  const stopVoice = useCallback(async () => {
+    if (!rec || recBusy) return;
+    setRecBusy(true);
+    try {
+      await rec.stopAndUnloadAsync();
+      const uri = rec.getURI();
+      setRec(null);
+      append("agent", "Transcribing…");
+      const transcript = await transcribeAudio(uri); // CHANGED
+      if (transcript) {
+        // Prefill the text box with the transcript so user can send/edit
+        setInput((prev) => (prev ? `${prev} ${transcript}` : transcript));
+        append("agent", `Transcript: "${transcript}"`);
+      } else {
+        append("agent", "No speech detected.");
+      }
+    } catch (e) {
+      append("agent", e?.message || "Failed to stop recording.");
+    } finally {
+      setRecBusy(false);
+    }
+  }, [rec, recBusy, transcribeAudio, append]);
+
   const onSend = async () => {
     const q = input.trim();
     if (!q || busy || sending) return;
@@ -180,7 +389,18 @@ export default function AgentScreen() {
     setBusy(true);
 
     try {
-      // If awaiting confirmation, treat user reply as yes/no with lenient matching
+      // Handle list intent first
+      if (isListIntent(q)) {
+        const target = extractEmailForList(q) || lastEmail || "";
+        if (!target && /\bwith\b/i.test(q)) {
+          append("agent", "email is missing");
+        } else {
+          await listMessages(target);
+        }
+        return;
+      }
+
+      // If awaiting confirmation, treat user reply as yes/no
       if (pendingRef.current) {
         if (/\b(yes|y|send|confirm|go ahead|proceed)\b/i.test(q)) {
           const { email, message } = pendingRef.current;
@@ -192,7 +412,19 @@ export default function AgentScreen() {
         return;
       }
 
-      const { email, message, confirm } = await parseWithGemini(q);
+      // Parse intent
+      let { email, message, confirm } = await parseWithGemini(q);
+
+      // Use last email if missing
+      if (!email && lastEmail) email = lastEmail;
+
+      // Persist latest parse snapshot (for continuity UX)
+      try {
+        await AsyncStorage.setItem(
+          "agent:lastParsed",
+          JSON.stringify({ email, message, confirm, at: Date.now() })
+        );
+      } catch {}
 
       if (!email) {
         append("agent", "email is missing");
@@ -245,49 +477,102 @@ export default function AgentScreen() {
     );
   };
 
-  return (
-    <View style={styles.container}>
-      <StatusBar
-        translucent
-        backgroundColor="transparent"
-        barStyle="light-content"
-      />
-      <FlatList
-        data={items}
-        keyExtractor={(m) => m.id}
-        contentContainerStyle={{
-          paddingTop: (StatusBar.currentHeight || 0) + 12,
-          paddingHorizontal: 14,
-          paddingBottom: 100,
-        }}
-        renderItem={renderItem}
-      />
-      <View style={styles.composer}>
-        <TextInput
-          style={styles.input}
-          value={input}
-          onChangeText={setInput}
-          placeholder="Ask the Agent"
-          placeholderTextColor="#6d7d92"
-          selectionColor={CLICK}
-          multiline
-        />
-        <TouchableOpacity
-          onPress={onSend}
-          disabled={busy || sending || !input.trim()}
-          style={[
-            styles.sendBtn,
-            (busy || sending || !input.trim()) && { opacity: 0.5 },
-          ]}
-        >
-          {busy || sending ? (
-            <ActivityIndicator color="#fff" size="small" />
-          ) : (
-            <Icon name="send" size={18} color="#fff" />
-          )}
-        </TouchableOpacity>
-      </View>
+  // Header/navbar
+  const Header = () => (
+    <View
+      style={{
+        height: HEADER_HEIGHT,
+        paddingTop: 4,
+        paddingHorizontal: 12,
+        flexDirection: "row",
+        alignItems: "center",
+        backgroundColor: "#0d1220",
+        borderBottomColor: "#1d2740",
+        borderBottomWidth: 1,
+      }}
+    >
+      <Text style={{ color: "#e9edef", fontSize: 16, fontWeight: "700" }}>
+        Agent
+      </Text>
     </View>
+  );
+
+  // KeyboardAvoidingView behavior: keep composer above keyboard without extra white space
+  const kavBehavior = Platform.OS === "ios" ? "padding" : "position";
+  const kavOffset = Platform.OS === "ios" ? HEADER_HEIGHT : 0;
+
+  return (
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: "#0b141a" }}
+      behavior={kavBehavior}
+      keyboardVerticalOffset={kavOffset}
+    >
+      <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
+      <Header />
+      <View style={{ flex: 1 }}>
+        <FlatList
+          data={items}
+          keyExtractor={(m) => m.id}
+          contentContainerStyle={{
+            paddingTop: 8,
+            paddingHorizontal: 14,
+            paddingBottom: 100, // leaves space for composer
+          }}
+          renderItem={renderItem}
+          keyboardShouldPersistTaps="handled"
+        />
+        <View style={styles.composer}>
+          <TextInput
+            style={styles.input}
+            value={input}
+            onChangeText={setInput}
+            placeholder="Ask the Agent"
+            placeholderTextColor="#6d7d92"
+            selectionColor={CLICK}
+            multiline
+          />
+          <TouchableOpacity
+            onPress={enhanceInput}
+            disabled={!input.trim() || enhancing}
+            style={[
+              styles.iconBtn,
+              (!input.trim() || enhancing) && { opacity: 0.5 },
+            ]}
+          >
+            {enhancing ? (
+              <ActivityIndicator color="#9ab1c1" size="small" />
+            ) : (
+              <Icon name="auto-awesome" size={20} color="#9ab1c1" />
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={rec ? stopVoice : startVoice}
+            disabled={recBusy}
+            style={[styles.iconBtn, recBusy && { opacity: 0.5 }]}
+          >
+            <Icon
+              name={rec ? "stop" : "keyboard-voice"}
+              size={rec ? 20 : 22}
+              color={rec ? "#ff7373" : "#9ab1c1"}
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={onSend}
+            disabled={busy || sending || !input.trim()}
+            style={[
+              styles.sendBtn,
+              (busy || sending || !input.trim()) && { opacity: 0.5 },
+            ]}
+          >
+            {busy || sending ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Icon name="send" size={18} color="#fff" />
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -318,6 +603,14 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   input: { flex: 1, color: "#e9edef", fontSize: 14, paddingVertical: 6 },
+  iconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 6,
+  },
   sendBtn: {
     width: 40,
     height: 40,
