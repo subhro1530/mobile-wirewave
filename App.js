@@ -19,6 +19,7 @@ import {
 } from "react-native";
 import CommunitiesScreen from "./src/screens/CommunitiesScreen";
 import API from "./src/api"; // ADDED
+import AgentScreen from "./src/screens/AgentScreen"; // NEW
 
 // Empty screens for Communities and Updates
 function ComingSoonScreen({ title }) {
@@ -31,7 +32,7 @@ function ComingSoonScreen({ title }) {
         backgroundColor: "#101010",
       }}
     >
-      <Text style={{ color: "#fff", fontSize: 18, fontWeight: "600" }}>
+      <Text style={{ color: "#ffffffff", fontSize: 18, fontWeight: "600" }}>
         {title}
       </Text>
       <Text style={{ color: "#aaa", marginTop: 8 }}>Feature coming soon</Text>
@@ -280,9 +281,11 @@ function MainTabs() {
           if (route.name === "Chats")
             return <Icon name="chat" color={color} size={size} />;
           if (route.name === "Assistant")
-            return <Icon name="auto-awesome" color={color} size={size} />; // CHANGED: keep icon
+            return <Icon name="auto-awesome" color={color} size={size} />;
           if (route.name === "Groups")
             return <Icon name="groups" color={color} size={size} />;
+          if (route.name === "Agent")
+            return <Icon name="support-agent" color={color} size={size} />; // NEW
           return null;
         },
       })}
@@ -291,6 +294,8 @@ function MainTabs() {
       {/* CHANGED: rename Updates -> Assistant */}
       <Tab.Screen name="Assistant" component={AssistantScreen} />
       <Tab.Screen name="Groups" component={CommunitiesScreen} />
+      <Tab.Screen name="Agent" component={AgentScreen} />
+      {/* NEW: to the right of Groups */}
     </Tab.Navigator>
   );
 }
