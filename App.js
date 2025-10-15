@@ -56,6 +56,10 @@ function AssistantScreen() {
   const [input, setInput] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [enhancing, setEnhancing] = React.useState(false); // NEW
+  const hfToken =
+    process.env.EXPO_PUBLIC_HF_TOKEN || process.env.HF_TOKEN || ""; // NEW
+  const [rec, setRec] = React.useState(null); // NEW
+  const [recBusy, setRecBusy] = React.useState(false); // NEW
 
   const send = React.useCallback(async () => {
     const q = input.trim();
@@ -120,6 +124,175 @@ function AssistantScreen() {
       setEnhancing(false);
     }
   }, [input, enhancing, authHdr]);
+
+  // NEW: mime helper
+  const mimeFromUri = (uri) => {
+    if (!uri) return "application/octet-stream";
+    const u = uri.toLowerCase();
+    if (u.endsWith(".wav")) return "audio/wav";
+    if (u.endsWith(".flac")) return "audio/flac";
+    if (u.endsWith(".m4a") || u.endsWith(".mp4")) return "audio/m4a";
+    if (u.endsWith(".mp3")) return "audio/mpeg";
+    if (u.endsWith(".webm")) return "audio/webm";
+    return "application/octet-stream";
+  };
+
+  // NEW: transcribe
+  const transcribeAudio = React.useCallback(
+    async (uri) => {
+      try {
+        if (!hfToken) {
+          setItems((p) => [
+            ...p,
+            { id: "e" + Date.now(), role: "bot", text: "ASR not configured" },
+          ]);
+          return "";
+        }
+        const blob = await fetch(uri).then((r) => r.blob());
+        const contentType = mimeFromUri(uri);
+        const resp = await fetch(
+          "https://api-inference.huggingface.co/models/openai/whisper-large-v3",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${hfToken}`,
+              Accept: "application/json",
+              "Content-Type": contentType,
+            },
+            body: blob,
+          }
+        );
+        if (!resp.ok)
+          throw new Error(
+            `${resp.status}: ${(await resp.text()).slice(0, 160)}`
+          );
+        const json = await resp.json();
+        return (
+          typeof json === "string"
+            ? json
+            : json?.text || json?.generated_text || ""
+        )
+          .toString()
+          .trim();
+      } catch (e) {
+        setItems((p) => [
+          ...p,
+          {
+            id: "e" + Date.now(),
+            role: "bot",
+            text: `ASR error: ${e?.message || ""}`,
+          },
+        ]);
+        return "";
+      }
+    },
+    [hfToken]
+  );
+
+  // NEW: load Recording API
+  const loadRecordingAPI = React.useCallback(async () => {
+    try {
+      const modAudio = await import("expo-audio");
+      if (modAudio?.Audio?.Recording) return modAudio.Audio;
+    } catch {}
+    try {
+      const modAV = await import("expo-av");
+      if (modAV?.Audio?.Recording) return modAV.Audio;
+    } catch {}
+    return null;
+  }, []);
+
+  // NEW: start/stop
+  const startVoice = React.useCallback(async () => {
+    if (rec || recBusy) return;
+    setRecBusy(true);
+    try {
+      const AudioAPI = await loadRecordingAPI();
+      if (!AudioAPI) {
+        setItems((p) => [
+          ...p,
+          {
+            id: "e" + Date.now(),
+            role: "bot",
+            text: "Recording unavailable (install expo-av)",
+          },
+        ]);
+        return;
+      }
+      let status = "granted";
+      try {
+        if (typeof AudioAPI.getPermissionsAsync === "function") {
+          const r = await AudioAPI.getPermissionsAsync();
+          status = r?.status || status;
+          if (
+            status !== "granted" &&
+            typeof AudioAPI.requestPermissionsAsync === "function"
+          ) {
+            const r2 = await AudioAPI.requestPermissionsAsync();
+            status = r2?.status || "denied";
+          }
+        } else if (typeof AudioAPI.requestPermissionsAsync === "function") {
+          const r = await AudioAPI.requestPermissionsAsync();
+          status = r?.status || "denied";
+        }
+      } catch {}
+      if (status !== "granted") {
+        setItems((p) => [
+          ...p,
+          {
+            id: "e" + Date.now(),
+            role: "bot",
+            text: "Microphone permission denied.",
+          },
+        ]);
+        return;
+      }
+      try {
+        if (typeof AudioAPI.setAudioModeAsync === "function") {
+          await AudioAPI.setAudioModeAsync({
+            allowsRecordingIOS: true,
+            playsInSilentModeIOS: true,
+            interruptionModeAndroid: 1,
+            shouldDuckAndroid: true,
+            staysActiveInBackground: false,
+          });
+        }
+      } catch {}
+      const Recording = AudioAPI.Recording;
+      const recInst = new Recording();
+      const HQ =
+        AudioAPI.RECORDING_OPTIONS_PRESET_HIGH_QUALITY ||
+        AudioAPI.RecordingOptionsPresets?.HIGH_QUALITY ||
+        {};
+      await recInst.prepareToRecordAsync(HQ);
+      await recInst.startAsync();
+      setRec(recInst);
+      setItems((p) => [
+        ...p,
+        {
+          id: "n" + Date.now(),
+          role: "bot",
+          text: "Recording… tap the mic again to stop.",
+        },
+      ]);
+    } finally {
+      setRecBusy(false);
+    }
+  }, [rec, recBusy, loadRecordingAPI]);
+
+  const stopVoice = React.useCallback(async () => {
+    if (!rec || recBusy) return;
+    setRecBusy(true);
+    try {
+      await rec.stopAndUnloadAsync();
+      const uri = rec.getURI();
+      setRec(null);
+      const t = await transcribeAudio(uri);
+      if (t) setInput((prev) => (prev ? `${prev} ${t}` : t));
+    } finally {
+      setRecBusy(false);
+    }
+  }, [rec, recBusy, transcribeAudio]);
 
   return (
     <View style={{ flex: 1, backgroundColor: "#0b141a" }}>
@@ -233,6 +406,26 @@ function AssistantScreen() {
           ) : (
             <Icon name="auto-awesome" size={20} color="#9ab1c1" />
           )}
+        </TouchableOpacity>
+        {/* NEW: Voice */}
+        <TouchableOpacity
+          onPress={rec ? stopVoice : startVoice}
+          disabled={recBusy}
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 20,
+            alignItems: "center",
+            justifyContent: "center",
+            marginLeft: 6,
+            opacity: recBusy ? 0.5 : 1,
+          }}
+        >
+          <Icon
+            name={rec ? "stop" : "keyboard-voice"}
+            size={rec ? 20 : 22}
+            color={rec ? "#ff7373" : "#9ab1c1"}
+          />
         </TouchableOpacity>
         <TouchableOpacity
           onPress={send}

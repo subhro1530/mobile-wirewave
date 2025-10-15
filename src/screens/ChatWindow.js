@@ -70,6 +70,10 @@ export default function ChatWindowScreen() {
   const [targetMsg, setTargetMsg] = useState(null); // NEW
   const [refreshing, setRefreshing] = useState(false); // NEW
   const [locSending, setLocSending] = useState(false); // NEW
+  const hfToken =
+    process.env.EXPO_PUBLIC_HF_TOKEN || process.env.HF_TOKEN || ""; // NEW
+  const [rec, setRec] = useState(null); // NEW
+  const [recBusy, setRecBusy] = useState(false); // NEW
 
   const loadMessages = useCallback(async () => {
     try {
@@ -592,6 +596,152 @@ export default function ChatWindowScreen() {
   // Safe no-op to avoid reference error if no message action UI is present
   const onLongPressMessage = useCallback(() => {}, []);
 
+  // Helper (same as Agent): infer mime from uri
+  const mimeFromUri = useCallback((uri) => {
+    if (!uri) return "application/octet-stream";
+    const u = uri.toLowerCase();
+    if (u.endsWith(".wav")) return "audio/wav";
+    if (u.endsWith(".flac")) return "audio/flac";
+    if (u.endsWith(".m4a") || u.endsWith(".mp4")) return "audio/m4a";
+    if (u.endsWith(".mp3")) return "audio/mpeg";
+    if (u.endsWith(".webm")) return "audio/webm";
+    return "application/octet-stream";
+  }, []); // NEW
+
+  // NEW: transcribe via HF Whisper
+  const transcribeAudio = useCallback(
+    async (uri) => {
+      try {
+        if (!hfToken) {
+          showToast?.("ASR not configured", "error");
+          return "";
+        }
+        const respBlob = await fetch(uri).then((r) => r.blob());
+        const contentType = mimeFromUri(uri);
+        const resp = await fetch(
+          "https://api-inference.huggingface.co/models/openai/whisper-large-v3",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${hfToken}`,
+              Accept: "application/json",
+              "Content-Type": contentType,
+            },
+            body: respBlob,
+          }
+        );
+        if (!resp.ok) {
+          const t = await resp.text();
+          throw new Error(`${resp.status}: ${t.slice(0, 180)}`);
+        }
+        const json = await resp.json();
+        const txt = (
+          typeof json === "string"
+            ? json
+            : json?.text || json?.generated_text || ""
+        )
+          .toString()
+          .trim();
+        return txt;
+      } catch (e) {
+        showToast?.(e?.message || "Transcription failed", "error");
+        return "";
+      }
+    },
+    [hfToken, mimeFromUri, showToast]
+  );
+
+  // NEW: load Audio API (prefer expo-audio, fallback expo-av)
+  const loadRecordingAPI = useCallback(async () => {
+    try {
+      const modAudio = await import("expo-audio");
+      if (modAudio?.Audio?.Recording) return modAudio.Audio;
+    } catch {}
+    try {
+      const modAV = await import("expo-av");
+      if (modAV?.Audio?.Recording) return modAV.Audio;
+    } catch {}
+    return null;
+  }, []);
+
+  // NEW: start/stop recording handlers
+  const startVoice = useCallback(async () => {
+    if (rec || recBusy) return;
+    setRecBusy(true);
+    try {
+      const AudioAPI = await loadRecordingAPI();
+      if (!AudioAPI) {
+        showToast?.("Recording unavailable (install expo-av)", "error");
+        return;
+      }
+      // permissions
+      try {
+        let status = "granted";
+        if (typeof AudioAPI.getPermissionsAsync === "function") {
+          const r = await AudioAPI.getPermissionsAsync();
+          status = r?.status || status;
+          if (
+            status !== "granted" &&
+            typeof AudioAPI.requestPermissionsAsync === "function"
+          ) {
+            const r2 = await AudioAPI.requestPermissionsAsync();
+            status = r2?.status || "denied";
+          }
+        } else if (typeof AudioAPI.requestPermissionsAsync === "function") {
+          const r = await AudioAPI.requestPermissionsAsync();
+          status = r?.status || "denied";
+        }
+        if (status !== "granted") {
+          showToast?.("Microphone permission denied", "error");
+          return;
+        }
+      } catch {}
+      // mode
+      try {
+        if (typeof AudioAPI.setAudioModeAsync === "function") {
+          await AudioAPI.setAudioModeAsync({
+            allowsRecordingIOS: true,
+            playsInSilentModeIOS: true,
+            interruptionModeAndroid: 1,
+            shouldDuckAndroid: true,
+            staysActiveInBackground: false,
+          });
+        }
+      } catch {}
+      // recording
+      const Recording = AudioAPI.Recording;
+      const recInst = new Recording();
+      const HQ =
+        AudioAPI.RECORDING_OPTIONS_PRESET_HIGH_QUALITY ||
+        AudioAPI.RecordingOptionsPresets?.HIGH_QUALITY ||
+        {};
+      await recInst.prepareToRecordAsync(HQ);
+      await recInst.startAsync();
+      setRec(recInst);
+      showToast?.("Recording… tap again to stop");
+    } catch (e) {
+      showToast?.(e?.message || "Failed to start recording", "error");
+    } finally {
+      setRecBusy(false);
+    }
+  }, [rec, recBusy, loadRecordingAPI, showToast]);
+
+  const stopVoice = useCallback(async () => {
+    if (!rec || recBusy) return;
+    setRecBusy(true);
+    try {
+      await rec.stopAndUnloadAsync();
+      const uri = rec.getURI();
+      setRec(null);
+      const transcript = await transcribeAudio(uri);
+      if (transcript) setText((t) => (t ? `${t} ${transcript}` : transcript));
+    } catch (e) {
+      showToast?.(e?.message || "Failed to stop recording", "error");
+    } finally {
+      setRecBusy(false);
+    }
+  }, [rec, recBusy, transcribeAudio]);
+
   return (
     <View style={styles.root}>
       {/* Outside overlay for dropdown */}
@@ -738,6 +888,19 @@ export default function ChatWindowScreen() {
               ) : (
                 <Icon name="auto-awesome" size={22} color="#8696a0" />
               )}
+            </TouchableOpacity>
+
+            {/* NEW: Voice toggle */}
+            <TouchableOpacity
+              style={styles.iconSmall}
+              onPress={rec ? stopVoice : startVoice}
+              disabled={recBusy}
+            >
+              <Icon
+                name={rec ? "stop" : "keyboard-voice"}
+                size={rec ? 20 : 22}
+                color={rec ? "#ff7373" : "#8696a0"}
+              />
             </TouchableOpacity>
 
             <TouchableOpacity
