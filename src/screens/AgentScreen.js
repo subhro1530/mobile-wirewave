@@ -500,15 +500,15 @@ export default function AgentScreen() {
     </View>
   );
 
-  // KeyboardAvoidingView behavior: keep composer above keyboard without extra white space
-  const kavBehavior = Platform.OS === "ios" ? "padding" : "position";
-  const kavOffset = Platform.OS === "ios" ? HEADER_HEIGHT : 0;
+  // FIX: Keyboard handling — use 'padding' on iOS, 'height' on Android; safe offset for header only on iOS
+  const kavBehavior = Platform.OS === "ios" ? "padding" : "height"; // CHANGED
+  const kavOffset = Platform.OS === "ios" ? HEADER_HEIGHT : 0; // CHANGED
 
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: "#0b141a" }}
-      behavior={kavBehavior}
-      keyboardVerticalOffset={kavOffset}
+      behavior={kavBehavior} // CHANGED
+      keyboardVerticalOffset={kavOffset} // CHANGED
     >
       <StatusBar
         translucent
@@ -523,61 +523,63 @@ export default function AgentScreen() {
           contentContainerStyle={{
             paddingTop: 8,
             paddingHorizontal: 14,
-            paddingBottom: 100, // leaves space for composer
+            paddingBottom: 8, // CHANGED: no large spacer needed since composer is in-flow
           }}
           renderItem={renderItem}
           keyboardShouldPersistTaps="handled"
         />
-        <View style={styles.composer}>
-          <TextInput
-            style={styles.input}
-            value={input}
-            onChangeText={setInput}
-            placeholder="Ask the Agent"
-            placeholderTextColor="#6d7d92"
-            selectionColor={CLICK}
-            multiline
+      </View>
+
+      {/* Composer now sits in normal flow at bottom (not absolute) */}
+      <View style={styles.composer}>
+        <TextInput
+          style={styles.input}
+          value={input}
+          onChangeText={setInput}
+          placeholder="Ask the Agent"
+          placeholderTextColor="#6d7d92"
+          selectionColor={CLICK}
+          multiline
+        />
+        <TouchableOpacity
+          onPress={enhanceInput}
+          disabled={!input.trim() || enhancing}
+          style={[
+            styles.iconBtn,
+            (!input.trim() || enhancing) && { opacity: 0.5 },
+          ]}
+        >
+          {enhancing ? (
+            <ActivityIndicator color="#9ab1c1" size="small" />
+          ) : (
+            <Icon name="auto-awesome" size={20} color="#9ab1c1" />
+          )}
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={rec ? stopVoice : startVoice}
+          disabled={recBusy}
+          style={[styles.iconBtn, recBusy && { opacity: 0.5 }]}
+        >
+          <Icon
+            name={rec ? "stop" : "keyboard-voice"}
+            size={rec ? 20 : 22}
+            color={rec ? "#ff7373" : "#9ab1c1"}
           />
-          <TouchableOpacity
-            onPress={enhanceInput}
-            disabled={!input.trim() || enhancing}
-            style={[
-              styles.iconBtn,
-              (!input.trim() || enhancing) && { opacity: 0.5 },
-            ]}
-          >
-            {enhancing ? (
-              <ActivityIndicator color="#9ab1c1" size="small" />
-            ) : (
-              <Icon name="auto-awesome" size={20} color="#9ab1c1" />
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={rec ? stopVoice : startVoice}
-            disabled={recBusy}
-            style={[styles.iconBtn, recBusy && { opacity: 0.5 }]}
-          >
-            <Icon
-              name={rec ? "stop" : "keyboard-voice"}
-              size={rec ? 20 : 22}
-              color={rec ? "#ff7373" : "#9ab1c1"}
-            />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={onSend}
-            disabled={busy || sending || !input.trim()}
-            style={[
-              styles.sendBtn,
-              (busy || sending || !input.trim()) && { opacity: 0.5 },
-            ]}
-          >
-            {busy || sending ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
-              <Icon name="send" size={18} color="#fff" />
-            )}
-          </TouchableOpacity>
-        </View>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={onSend}
+          disabled={busy || sending || !input.trim()}
+          style={[
+            styles.sendBtn,
+            (busy || sending || !input.trim()) && { opacity: 0.5 },
+          ]}
+        >
+          {busy || sending ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <Icon name="send" size={18} color="#fff" />
+          )}
+        </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
   );
@@ -596,10 +598,7 @@ const styles = StyleSheet.create({
   userBubble: { backgroundColor: "#223b53", borderColor: "#2c4f6d" },
   text: { color: "#e9edef", fontSize: 13, lineHeight: 20 },
   composer: {
-    position: "absolute",
-    left: 12,
-    right: 12,
-    bottom: 18,
+    // CHANGED: remove absolute positioning; make it a normal bottom bar
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#182a3b",
@@ -608,6 +607,8 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     paddingHorizontal: 10,
     paddingVertical: 6,
+    margin: 12, // NEW: spacing from edges
+    marginTop: 0, // NEW
   },
   input: { flex: 1, color: "#e9edef", fontSize: 14, paddingVertical: 6 },
   iconBtn: {
