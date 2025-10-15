@@ -55,7 +55,7 @@ export default function AgentScreen() {
     {
       id: "hello",
       role: "agent",
-      text: "I’m the Agent. Tell me: “send a message to user@example.com named Hello there!”. I’ll confirm before sending. If anything’s missing, I’ll ask for it.",
+      text: "I’m the Agent. Try: “send a message to user@example.com named Hello there!”, or “list last 5 messages”, “show messages to me”, “show last 3 with user@example.com”. I’ll confirm before sending.",
     },
   ]);
   const [input, setInput] = useState("");
@@ -79,6 +79,23 @@ export default function AgentScreen() {
       ...p,
       { id: String(Date.now()) + Math.random(), role, text, ...extra },
     ]);
+
+  // --- NEW: voice-style speaker (optional, best effort) ---
+  const speakOut = useCallback(async (text) => {
+    try {
+      const mod = await import("expo-speech");
+      const Speech = mod?.default ?? mod;
+      if (Speech?.speak) {
+        Speech.speak(text, {
+          language: "en-US",
+          pitch: 1.0,
+          rate: 1.0,
+        });
+      }
+    } catch {
+      // no-op if expo-speech not installed
+    }
+  }, []);
 
   async function parseWithGemini(text) {
     // Fallback regex if no key
@@ -185,62 +202,225 @@ export default function AgentScreen() {
     return { email, message, confirm };
   }
 
-  // NEW: detect "list messages" intent and optional target email
-  function isListIntent(text) {
-    return /\b(list|show|fetch)\s+(all\s+)?messages\b/i.test(text);
-  }
-  function extractEmailForList(text) {
-    const m = String(text || "").match(
-      /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i
-    );
-    return m?.[0] || "";
+  // --- NEW: list intent parsing (Gemini + regex fallback) ---
+  function parseListWithRegex(text) {
+    const src = String(text || "");
+    const intent = /\b(list|show|fetch)\s+(my\s+)?(recent\s+)?messages\b/i.test(
+      src
+    )
+      ? "list"
+      : "";
+    const nMatch =
+      src.match(/\blast\s+(\d+)\b/i) || src.match(/\b(\d+)\s*messages?\b/i);
+    const last_n = nMatch
+      ? Math.max(1, Math.min(50, parseInt(nMatch[1], 10)))
+      : 0;
+
+    const with_email = (
+      src.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] || ""
+    ).trim();
+
+    let direction = "any";
+    if (/\b(to me|sent to me|received|inbox|for me)\b/i.test(src))
+      direction = "to_me";
+    if (/\b(from me|i sent|outbox)\b/i.test(src)) direction = "from_me";
+    if (with_email) direction = "with_contact";
+
+    const include_sender = true;
+    return { intent, last_n, with_email, direction, include_sender };
   }
 
-  // NEW: list messages from API and render a compact summary
-  async function listMessages(targetEmail) {
+  async function parseListWithGemini(text) {
+    if (!geminiKey) return parseListWithRegex(text);
+    try {
+      const resp = await fetch(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" +
+          encodeURIComponent(geminiKey),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [
+              {
+                role: "user",
+                parts: [
+                  {
+                    text:
+                      "Extract ONLY JSON. Schema: " +
+                      JSON.stringify({
+                        intent: "list",
+                        last_n: 0,
+                        with_email: "",
+                        direction: "any",
+                        include_sender: true,
+                      }) +
+                      ". Rules: intent='list' if the user wants to view messages. last_n is how many (default 5 if not given). with_email is a single email if user asks for a specific contact. direction is one of any|to_me|from_me|with_contact. include_sender is true if they want sender names. Instruction: " +
+                      text,
+                  },
+                ],
+              },
+            ],
+            generationConfig: { temperature: 0 },
+          }),
+        }
+      );
+      const data = await resp.json();
+      const raw =
+        data?.candidates?.[0]?.content?.parts?.[0]?.text ??
+        data?.candidates?.[0]?.content?.parts?.[0]?.raw_text ??
+        "";
+      const jsonStr = String(raw)
+        .replace(/```json|```/g, "")
+        .trim();
+      const parsed = JSON.parse(jsonStr);
+      const fallback = parseListWithRegex(text);
+
+      return {
+        intent: parsed?.intent === "list" ? "list" : fallback.intent,
+        last_n: Number(parsed?.last_n) || fallback.last_n || 5,
+        with_email: (parsed?.with_email || fallback.with_email || "")
+          .replace(/^[<("'\[\s]+/, "")
+          .replace(/[>)"'\]\s.,;:]+$/, ""),
+        direction: parsed?.direction || fallback.direction || "any",
+        include_sender:
+          typeof parsed?.include_sender === "boolean"
+            ? parsed.include_sender
+            : true,
+      };
+    } catch {
+      return parseListWithRegex(text);
+    }
+  }
+
+  // --- NEW: POST-first listing with fallbacks ---
+  async function tryPostList(payload) {
+    const endpoints = ["/messages/list", "/messages/query", "/messages/search"];
+    for (const ep of endpoints) {
+      try {
+        const { data } = await API.post(ep, payload, { headers: authHdr });
+        if (data) return data;
+      } catch {}
+    }
+    return null;
+  }
+
+  async function fetchAllMessagesFallback() {
     try {
       const { data } = await API.get("/messages", { headers: authHdr });
-      const all = Array.isArray(data) ? data : [];
-      const recent = targetEmail
-        ? all.filter(
-            (m) =>
-              m.sender_email === targetEmail || m.receiver_email === targetEmail
-          )
-        : all;
-      if (!recent.length) {
-        append(
-          "agent",
-          targetEmail
-            ? `No messages with ${targetEmail}.`
-            : "No messages found."
-        );
-        return;
-      }
-      const last10 = recent
-        .sort(
-          (a, b) =>
-            new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime()
-        )
-        .slice(-10);
-      const lines = last10.map((m) => {
-        const me =
-          m.sender_email && m.sender_email !== targetEmail ? "You" : "They";
+      return Array.isArray(data) ? data : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function coerceMessagesShape(list) {
+    // Normalize a few possible backend shapes
+    return (Array.isArray(list) ? list : []).map((m) => ({
+      id:
+        m.id ??
+        m._id ??
+        `${m.sender_email || ""}-${m.sent_at || ""}-${Math.random()}`,
+      sender_email: m.sender_email ?? m.from ?? m.sender ?? "",
+      sender_name: m.sender_name ?? m.senderFullName ?? m.name ?? "",
+      receiver_email: m.receiver_email ?? m.to ?? m.receiver ?? "",
+      content: m.content ?? m.text ?? m.message ?? "",
+      sent_at: m.sent_at ?? m.created_at ?? m.timestamp ?? Date.now(),
+    }));
+  }
+
+  async function summarizeMessagesWithGemini(messages, opts = {}) {
+    const fallback = () => {
+      const lines = messages.map((m, i) => {
+        const fromName = (m.sender_name || m.sender_email || "Unknown").trim();
+        const msg = String(m.content || "")
+          .replace(/\s+/g, " ")
+          .trim();
         const t = new Date(m.sent_at).toLocaleString();
-        return `${me} @ ${t}: ${m.content}`;
+        return `${i + 1}. From ${fromName} @ ${t}: ${msg}`;
       });
+      return lines.join("\n");
+    };
+
+    if (!geminiKey) return fallback();
+
+    try {
+      const prompt = `Turn these messages into a concise, voice-assistant style readout. 
+- Keep it brief and natural.
+- Include sender names (or emails).
+- One short line per message.
+- No markdown, no code fences.
+
+Messages JSON:
+${JSON.stringify(messages.slice(0, 20))}`;
+
+      const resp = await fetch(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" +
+          encodeURIComponent(geminiKey),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.2 },
+          }),
+        }
+      );
+      const data = await resp.json();
+      const out =
+        data?.candidates?.[0]?.content?.parts?.[0]?.text ??
+        data?.candidates?.[0]?.content?.parts?.[0]?.raw_text ??
+        "";
+      const text = String(out || "").trim();
+      return text || fallback();
+    } catch {
+      return fallback();
+    }
+  }
+
+  async function listMessagesAdvanced(listReq) {
+    const limit = Math.max(1, Math.min(50, listReq?.last_n || 5));
+    const payload = {
+      limit,
+      with_email: listReq?.with_email || undefined,
+      direction: listReq?.direction || "any", // let backend resolve 'to_me' based on auth
+      include_sender: true,
+    };
+
+    // Try POST-first
+    let raw = await tryPostList(payload);
+    if (!raw) {
+      // Fallback: GET and filter locally
+      const all = await fetchAllMessagesFallback();
+      raw = all;
+      // local filter for with_email if provided
+      if (listReq?.with_email) {
+        raw = raw.filter(
+          (m) =>
+            m.sender_email === listReq.with_email ||
+            m.receiver_email === listReq.with_email
+        );
+      }
+    }
+
+    const normalized = coerceMessagesShape(raw || [])
+      .sort(
+        (a, b) => new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime()
+      )
+      .slice(-limit);
+
+    if (!normalized.length) {
       append(
         "agent",
-        `Recent messages${targetEmail ? ` with ${targetEmail}` : ""}:\n` +
-          lines.join("\n")
+        listReq?.with_email
+          ? `No messages found with ${listReq.with_email}.`
+          : "No messages found."
       );
-    } catch (e) {
-      const msg =
-        e?.response?.data?.error ||
-        e?.response?.data?.message ||
-        e?.message ||
-        "Failed to load messages";
-      append("agent", `Error: ${msg}`);
+      return;
     }
+
+    const summary = await summarizeMessagesWithGemini(normalized);
+    append("agent", summary);
+    speakOut(summary); // optional voice output
   }
 
   async function confirmAndSend(email, message) {
@@ -460,14 +640,14 @@ export default function AgentScreen() {
     setBusy(true);
 
     try {
-      // Handle list intent first
-      if (isListIntent(q)) {
-        const target = extractEmailForList(q) || lastEmail || "";
-        if (!target && /\bwith\b/i.test(q)) {
-          append("agent", "email is missing");
-        } else {
-          await listMessages(target);
-        }
+      // --- NEW: list intent handling (Gemini + regex) ---
+      const listParse = await parseListWithGemini(q);
+      if (listParse.intent === "list" || isListIntent(q)) {
+        const effective = {
+          ...listParse,
+          last_n: listParse.last_n || 5,
+        };
+        await listMessagesAdvanced(effective);
         return;
       }
 
@@ -505,12 +685,10 @@ export default function AgentScreen() {
         append("agent", "message is missing");
         return;
       }
-
       if (confirm) {
         await confirmAndSend(email, message);
         return;
       }
-
       pendingRef.current = { email, message };
       append(
         "agent",
