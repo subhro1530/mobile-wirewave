@@ -312,10 +312,13 @@ export default function AgentScreen() {
           );
         }
         const json = await resp.json();
-        const text =
-          (typeof json === "string" ? json : json?.text || json?.generated_text || "")
-            .toString()
-            .trim();
+        const text = (
+          typeof json === "string"
+            ? json
+            : json?.text || json?.generated_text || ""
+        )
+          .toString()
+          .trim();
         return text;
       } catch (e) {
         append("agent", `ASR error: ${e?.message || "transcription failed"}`);
@@ -507,7 +510,11 @@ export default function AgentScreen() {
       behavior={kavBehavior}
       keyboardVerticalOffset={kavOffset}
     >
-      <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
+      <StatusBar
+        translucent
+        backgroundColor="transparent"
+        barStyle="light-content"
+      />
       <Header />
       <View style={{ flex: 1 }}>
         <FlatList
