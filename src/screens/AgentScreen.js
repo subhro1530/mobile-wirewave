@@ -754,6 +754,29 @@ ${JSON.stringify(messages.slice(0, 20))}`;
   const kavBehavior = Platform.OS === "ios" ? "padding" : "height";
   const kavOffset = Platform.OS === "ios" ? 12 : 0; // minimal offset; no title bar
 
+  // NEW: start a fresh session by clearing storage and resetting state
+  const startNewSession = useCallback(async () => {
+    try {
+      await AsyncStorage.multiRemove([
+        "agent:lastParsed",
+        "agent:lastEmail",
+        "agent:profile",
+      ]);
+    } catch {}
+    pendingRef.current = null;
+    setInput("");
+    setLastEmail("");
+    setBusy(false);
+    setSending(false);
+    setItems([
+      {
+        id: String(Date.now()),
+        role: "agent",
+        text: "New session started. I’m the Agent. Try: “send a message to user@example.com named Hello there!”, or “list last 5 messages”, “show messages to me”, “show last 3 with user@example.com”. I’ll confirm before sending.",
+      },
+    ]);
+  }, []);
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: "#0b141a" }}
@@ -831,6 +854,12 @@ ${JSON.stringify(messages.slice(0, 20))}`;
           )}
         </TouchableOpacity>
       </View>
+      {/* NEW: Floating "new session" button */}
+      <View style={styles.fabContainer}>
+        <TouchableOpacity onPress={startNewSession} style={styles.fab}>
+          <Icon name="restart-alt" size={22} color="#fff" />
+        </TouchableOpacity>
+      </View>
     </KeyboardAvoidingView>
   );
 }
@@ -889,6 +918,26 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
   },
   ctaTxt: { color: "#fff", marginLeft: 6, fontSize: 12, fontWeight: "600" },
+  // NEW: floating action button styles
+  fabContainer: {
+    position: "absolute",
+    right: 16,
+    bottom: 88, // sit above the composer
+    zIndex: 10,
+    elevation: 6,
+  },
+  fab: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: CLICK,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+  },
 });
 
 // CHANGED: stricter list-intent detector; never triggers when the user asks to send
