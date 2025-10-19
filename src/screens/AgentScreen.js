@@ -74,6 +74,16 @@ export default function AgentScreen() {
     })();
   }, []);
 
+  // NEW: clear transient session state so previous intents don't leak into new sessions
+  useEffect(() => {
+    (async () => {
+      try {
+        await AsyncStorage.removeItem("agent:lastParsed");
+      } catch {}
+      pendingRef.current = null;
+    })();
+  }, []);
+
   const append = (role, text, extra = {}) =>
     setItems((p) => [
       ...p,
@@ -431,9 +441,12 @@ ${JSON.stringify(messages.slice(0, 20))}`;
         { receiver_email: email, content: message },
         { headers: authHdr }
       );
-      // Persist last email for subsequent sends
-      await AsyncStorage.setItem("agent:lastEmail", email); // NEW
-      setLastEmail(email); // NEW
+      await AsyncStorage.setItem("agent:lastEmail", email);
+      // NEW: wipe transient parse snapshot after a successful send
+      try {
+        await AsyncStorage.removeItem("agent:lastParsed");
+      } catch {}
+      setLastEmail(email);
       append("agent", `Message sent to ${email}.`, {
         action: { type: "openChat", email },
       });
@@ -640,18 +653,7 @@ ${JSON.stringify(messages.slice(0, 20))}`;
     setBusy(true);
 
     try {
-      // --- NEW: list intent handling (Gemini + regex) ---
-      const listParse = await parseListWithGemini(q);
-      if (listParse.intent === "list" || isListIntent(q)) {
-        const effective = {
-          ...listParse,
-          last_n: listParse.last_n || 5,
-        };
-        await listMessagesAdvanced(effective);
-        return;
-      }
-
-      // If awaiting confirmation, treat user reply as yes/no
+      // NEW: resolve pending confirmations first (prevents wrong intent routing)
       if (pendingRef.current) {
         if (/\b(yes|y|send|confirm|go ahead|proceed)\b/i.test(q)) {
           const { email, message } = pendingRef.current;
@@ -659,23 +661,42 @@ ${JSON.stringify(messages.slice(0, 20))}`;
         } else {
           append("agent", "Okay, cancelled. Start again anytime.");
           pendingRef.current = null;
+          // NEW: clear transient parse snapshot on cancel
+          try {
+            await AsyncStorage.removeItem("agent:lastParsed");
+          } catch {}
         }
         return;
       }
 
-      // Parse intent
+      // NEW: prefer send-like intents over list
+      const isSendLike =
+        /\b(send|message|mail|text|deliver|forward|post)\b/i.test(q);
+      if (!isSendLike) {
+        const listParse = await parseListWithGemini(q);
+        if (listParse.intent === "list" || isListIntent(q)) {
+          const effective = {
+            ...listParse,
+            last_n: listParse.last_n || 5,
+          };
+          await listMessagesAdvanced(effective);
+          return;
+        }
+      }
+
+      // Parse intent for direct send
       let { email, message, confirm } = await parseWithGemini(q);
 
       // Use last email if missing
       if (!email && lastEmail) email = lastEmail;
 
-      // Persist latest parse snapshot (for continuity UX)
-      try {
-        await AsyncStorage.setItem(
-          "agent:lastParsed",
-          JSON.stringify({ email, message, confirm, at: Date.now() })
-        );
-      } catch {}
+      // CHANGED: stop persisting lastParsed to avoid stale intent confusion
+      // try {
+      //   await AsyncStorage.setItem(
+      //     "agent:lastParsed",
+      //     JSON.stringify({ email, message, confirm, at: Date.now() })
+      //   );
+      // } catch {}
 
       if (!email) {
         append("agent", "email is missing");
@@ -869,3 +890,15 @@ const styles = StyleSheet.create({
   },
   ctaTxt: { color: "#fff", marginLeft: 6, fontSize: 12, fontWeight: "600" },
 });
+
+// CHANGED: stricter list-intent detector; never triggers when the user asks to send
+function isListIntent(text = "") {
+  const t = String(text || "").toLowerCase();
+  const hasListWord = /\b(list|show|see|display|fetch|view)\b/.test(t);
+  const mentionsMessages = /\b(messages?|chats?|inbox|outbox|threads?)\b/.test(
+    t
+  );
+  const looksLikeSend =
+    /\b(send|message|mail|text|deliver|forward|post|to\s+\S+)\b/.test(t);
+  return hasListWord && mentionsMessages && !looksLikeSend;
+}

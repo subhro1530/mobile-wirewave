@@ -43,9 +43,11 @@ function ComingSoonScreen({ title }) {
 // NEW: AI Assistant screen (chat-style)
 function AssistantScreen() {
   const { userToken } = useContext(AuthContext);
-  const authHdr = userToken
-    ? { Authorization: `Bearer ${userToken}` }
-    : undefined;
+  // NEW: memoize auth header to keep stable between renders
+  const authHdr = React.useMemo(
+    () => (userToken ? { Authorization: `Bearer ${userToken}` } : undefined),
+    [userToken]
+  );
   const [items, setItems] = React.useState([
     {
       id: "greet",
