@@ -39,6 +39,18 @@ const PALETTE = {
   accentSoft: "#2b5fcc",
 };
 
+// Cloudinary config (use provided preset; set cloud name via env)
+const CLOUDINARY_UPLOAD_PRESET = "9-eTnQ576b1Eeqsnylqon1WLNwA";
+const CLOUDINARY_CLOUD_NAME =
+  process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME || ""; // changed: detect unset
+const CLOUDINARY_API = (cloud) =>
+  `https://api.cloudinary.com/v1_1/${cloud}/image/upload`;
+// Fallback demo (if your cloud/preset is not configured server-side)
+const CLOUDINARY_FALLBACK = {
+  cloud: "demo",
+  preset: "docs_upload_example_us_preset",
+};
+
 export default function ChatScreen() {
   const { userEmail, logout, userToken } = useContext(AuthContext); // ADDED userToken
   const authHdr = userToken
@@ -82,6 +94,7 @@ export default function ChatScreen() {
   const [hasProfile, setHasProfile] = useState(false); // NEW: track if my profile exists
   // NEW: new‑chat found profile (via email or userid)
   const [newChatFound, setNewChatFound] = useState(null); // { user_email, userid, ... } | null
+  const [avatarUploading, setAvatarUploading] = useState(false); // NEW: cloudinary upload state
 
   // === AUTO EMAIL EXISTENCE CHECK (debounced) ===
   useEffect(() => {
@@ -252,7 +265,9 @@ export default function ChatScreen() {
         : !archivedChats.has(c.email)
     );
     // just time-based sort
-    list.sort((a, b) => new Date(b.lastMessageTime) - new Date(a.lastMessageTime));
+    list.sort(
+      (a, b) => new Date(b.lastMessageTime) - new Date(a.lastMessageTime)
+    );
     return list;
   }, [messages, userEmail, archivedChats, showArchivedView]);
 
@@ -348,6 +363,116 @@ export default function ChatScreen() {
     if (profileViewingEmail === userEmail) setProfileEditMode(true);
   };
 
+  // NEW: pick image from gallery and upload to Cloudinary (with robust fallback)
+  const pickAndUploadAvatar = useCallback(async () => {
+    if (avatarUploading) return;
+    try {
+      setAvatarUploading(true);
+
+      // dynamic import to avoid hard dependency when not installed
+      let ImagePicker;
+      try {
+        ImagePicker =
+          (await import("expo-image-picker"))?.default ??
+          (await import("expo-image-picker"));
+      } catch {
+        showToast("Install expo-image-picker to upload images.", "error");
+        return;
+      }
+
+      // permissions
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync?.();
+      if (perm && perm.status !== "granted") {
+        showToast("Media library permission denied.", "error");
+        return;
+      }
+
+      const res = await ImagePicker.launchImageLibraryAsync?.({
+        mediaTypes: ImagePicker.MediaTypeOptions?.Images ?? "Images",
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!res || res.canceled) return;
+      const asset = res.assets?.[0];
+      if (!asset?.uri) {
+        showToast("No image selected.", "error");
+        return;
+      }
+
+      const uri = asset.uri;
+      const mime =
+        asset.mimeType ||
+        (uri.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg");
+
+      const attemptUpload = async (cloud, preset) => {
+        const form = new FormData();
+        form.append("file", { uri, name: "avatar", type: mime });
+        form.append("upload_preset", preset);
+        const resp = await fetch(CLOUDINARY_API(cloud), {
+          method: "POST",
+          body: form,
+        });
+        const json = await resp.json();
+        const url = json?.secure_url || json?.url;
+        if (!resp.ok || !url) {
+          const err = json?.error?.message || "Upload failed";
+          throw new Error(err);
+        }
+        return url;
+      };
+
+      let url = null;
+      // Try configured cloud/preset first if provided
+      if (CLOUDINARY_CLOUD_NAME && CLOUDINARY_UPLOAD_PRESET) {
+        try {
+          url = await attemptUpload(
+            CLOUDINARY_CLOUD_NAME,
+            CLOUDINARY_UPLOAD_PRESET
+          );
+        } catch (e) {
+          // Always try demo fallback once on any failure
+          try {
+            url = await attemptUpload(
+              CLOUDINARY_FALLBACK.cloud,
+              CLOUDINARY_FALLBACK.preset
+            );
+            showToast(
+              "Uploaded via Cloudinary demo. Configure your cloud for production.",
+              "success"
+            );
+          } catch (e2) {
+            throw e2;
+          }
+        }
+      } else {
+        // no cloud configured: use demo directly
+        url = await attemptUpload(
+          CLOUDINARY_FALLBACK.cloud,
+          CLOUDINARY_FALLBACK.preset
+        );
+        showToast(
+          "Using Cloudinary demo. Set EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME to use your preset.",
+          "success"
+        );
+      }
+
+      // set into form for saveMyProfile payload; update preview
+      setProfileForm((f) => ({ ...f, avatar_url: url }));
+      setProfileData((prev) => ({
+        ...(prev || {}),
+        avatar_url: url,
+        user_email: prev?.user_email || profileViewingEmail,
+      }));
+      showToast("Avatar uploaded. Save to apply.", "success");
+    } catch (e) {
+      showToast(e?.message || "Upload failed", "error");
+    } finally {
+      setAvatarUploading(false);
+    }
+  }, [avatarUploading, profileViewingEmail, showToast]);
+
   const saveMyProfile = useCallback(async () => {
     if (profileViewingEmail !== userEmail) return;
     try {
@@ -356,7 +481,7 @@ export default function ChatScreen() {
       const payload = {
         name: profileForm.name.trim(),
         about: profileForm.about.trim(),
-        avatar_url: profileForm.avatar_url.trim(),
+        avatar_url: profileForm.avatar_url.trim(), // now filled by Cloudinary upload
       };
       const method = hasProfile ? "put" : "post";
       await API[method]("/profile", payload, { headers: authHdr }); // CHANGED
@@ -592,7 +717,12 @@ export default function ChatScreen() {
               openProfile(userEmail);
             }}
           >
-            <Icon name="person" size={16} color="#3a7afe" style={styles.menuIcon} />
+            <Icon
+              name="person"
+              size={16}
+              color="#3a7afe"
+              style={styles.menuIcon}
+            />
             <Text style={styles.menuTxt}>My Profile</Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -602,7 +732,12 @@ export default function ChatScreen() {
               openStarred();
             }}
           >
-            <Icon name="grade" size={16} color="#ffd54f" style={styles.menuIcon} />
+            <Icon
+              name="grade"
+              size={16}
+              color="#ffd54f"
+              style={styles.menuIcon}
+            />
             <Text style={styles.menuTxt}>Starred Messages</Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -612,8 +747,15 @@ export default function ChatScreen() {
               deleteAccount();
             }}
           >
-            <Icon name="delete-forever" size={16} color="#ff7777" style={styles.menuIcon} />
-            <Text style={[styles.menuTxt, { color: "#ff7777" }]}>Delete Account</Text>
+            <Icon
+              name="delete-forever"
+              size={16}
+              color="#ff7777"
+              style={styles.menuIcon}
+            />
+            <Text style={[styles.menuTxt, { color: "#ff7777" }]}>
+              Delete Account
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.menuItem}
@@ -622,7 +764,12 @@ export default function ChatScreen() {
               logout?.();
             }}
           >
-            <Icon name="logout" size={16} color="#ff6b6b" style={styles.menuIcon} />
+            <Icon
+              name="logout"
+              size={16}
+              color="#ff6b6b"
+              style={styles.menuIcon}
+            />
             <Text style={[styles.menuTxt, { color: "#ff6b6b" }]}>Logout</Text>
           </TouchableOpacity>
         </View>
@@ -705,7 +852,10 @@ export default function ChatScreen() {
                 style={{ flex: 1 }}
                 activeOpacity={0.85}
                 onPress={() =>
-                  navigation.navigate("ChatWindow", { contact: item.email })
+                  navigation.navigate("ChatWindow", {
+                    contact: item.email,
+                    avatar: avatar || undefined, // pass avatar to ChatWindow
+                  })
                 }
                 onLongPress={() => onLongPressChat(item.email)}
                 delayLongPress={320}
@@ -821,8 +971,16 @@ export default function ChatScreen() {
             />
             <Text style={styles.sheetBtnTxt}>View Profile</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.sheetBtn} onPress={() => deleteChat(chatActionEmail)}>
-            <Icon name="delete" size={16} color="#ff6666" style={{ marginRight: 8 }} />
+          <TouchableOpacity
+            style={styles.sheetBtn}
+            onPress={() => deleteChat(chatActionEmail)}
+          >
+            <Icon
+              name="delete"
+              size={16}
+              color="#ff6666"
+              style={{ marginRight: 8 }}
+            />
             <Text style={[styles.sheetBtnTxt, { color: "#ff6666" }]}>
               Delete Chat
             </Text>
@@ -831,7 +989,9 @@ export default function ChatScreen() {
             style={[styles.sheetBtn, { justifyContent: "center" }]}
             onPress={() => setChatActionVisible(false)}
           >
-            <Text style={[styles.sheetBtnTxt, { color: "#8696a0" }]}>Cancel</Text>
+            <Text style={[styles.sheetBtnTxt, { color: "#8696a0" }]}>
+              Cancel
+            </Text>
           </TouchableOpacity>
         </View>
       </Modal>
@@ -859,28 +1019,45 @@ export default function ChatScreen() {
           ) : (
             <>
               <View style={styles.profileHeaderRow}>
-                <View style={styles.profileAvatarWrap}>
-                  {profileViewingEmail === userEmail &&
-                  profileEditMode ? null : profileData?.avatar_url ? (
-                    <Image
-                      source={{ uri: profileData.avatar_url }}
-                      style={styles.profileAvatarLarge}
-                    />
-                  ) : profileViewingEmail === userEmail &&
-                    profileForm.avatar_url &&
-                    !profileEditMode ? (
-                    <Image
-                      source={{ uri: profileForm.avatar_url }}
-                      style={styles.profileAvatarLarge}
-                    />
-                  ) : (
-                    <View style={styles.profileAvatarFallback}>
-                      <Text style={styles.profileAvatarFallbackTxt}>
-                        {profileViewingEmail?.[0]?.toUpperCase() || "U"}
-                      </Text>
+                {/* CHANGED: always show avatar; tap to upload in edit mode */}
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  style={styles.profileAvatarWrap}
+                  disabled={
+                    !(profileViewingEmail === userEmail && profileEditMode) ||
+                    avatarUploading
+                  }
+                  onPress={pickAndUploadAvatar}
+                >
+                  {(() => {
+                    const previewUrl =
+                      profileForm.avatar_url || profileData?.avatar_url || null;
+                    if (previewUrl) {
+                      return (
+                        <Image
+                          source={{ uri: previewUrl }}
+                          style={styles.profileAvatarLarge}
+                        />
+                      );
+                    }
+                    return (
+                      <View style={styles.profileAvatarFallback}>
+                        <Text style={styles.profileAvatarFallbackTxt}>
+                          {profileViewingEmail?.[0]?.toUpperCase() || "U"}
+                        </Text>
+                      </View>
+                    );
+                  })()}
+                  {profileViewingEmail === userEmail && profileEditMode && (
+                    <View style={styles.avatarUploadBadge}>
+                      {avatarUploading ? (
+                        <ActivityIndicator color="#fff" size="small" />
+                      ) : (
+                        <Icon name="photo-camera" size={16} color="#fff" />
+                      )}
                     </View>
                   )}
-                </View>
+                </TouchableOpacity>
                 {profileViewingEmail === userEmail && (
                   <TouchableOpacity
                     style={styles.inlineEditBtn}
@@ -896,42 +1073,31 @@ export default function ChatScreen() {
               </View>
 
               <Text style={styles.profileEmail}>{profileViewingEmail}</Text>
-
               {profileViewingEmail === userEmail && profileEditMode ? (
                 <>
-                  {/* editable inputs keep white text */}
+                  {/* CHANGED: placeholders now white */}
                   <RNTextInput
                     style={styles.editInput}
                     placeholder="Name"
-                    placeholderTextColor="#77818c"
+                    placeholderTextColor="#e9edef"
                     value={profileForm.name}
                     onChangeText={(v) =>
                       setProfileForm((f) => ({ ...f, name: v }))
                     }
-                    selectionColor="#3a7afe" // added
+                    selectionColor="#3a7afe"
                   />
                   <RNTextInput
                     style={[styles.editInput, { height: 80 }]}
                     placeholder="About"
-                    placeholderTextColor="#77818c"
+                    placeholderTextColor="#e9edef"
                     multiline
                     value={profileForm.about}
                     onChangeText={(v) =>
                       setProfileForm((f) => ({ ...f, about: v }))
                     }
-                    selectionColor="#3a7afe" // added
+                    selectionColor="#3a7afe"
                   />
-                  <RNTextInput
-                    style={styles.editInput}
-                    placeholder="Avatar URL"
-                    placeholderTextColor="#77818c"
-                    autoCapitalize="none"
-                    value={profileForm.avatar_url}
-                    onChangeText={(v) =>
-                      setProfileForm((f) => ({ ...f, avatar_url: v }))
-                    }
-                    selectionColor="#3a7afe" // added
-                  />
+                  {/* Removed Avatar URL input. Tap the avatar to upload via Cloudinary. */}
                   <View style={styles.editActions}>
                     <TouchableOpacity
                       style={styles.cancelBtn}
@@ -951,8 +1117,11 @@ export default function ChatScreen() {
                     <TouchableOpacity
                       style={styles.saveBtn}
                       onPress={saveMyProfile}
+                      disabled={avatarUploading}
                     >
-                      <Text style={styles.saveTxt}>Save</Text>
+                      <Text style={styles.saveTxt}>
+                        {avatarUploading ? "Uploading..." : "Save"}
+                      </Text>
                     </TouchableOpacity>
                   </View>
                 </>
@@ -973,10 +1142,6 @@ export default function ChatScreen() {
                   <Text style={styles.heading}>Username</Text>
                   <Text style={styles.profileMetaLine}>
                     {profileData?.userid || "—"}
-                  </Text>
-                  <Text style={styles.heading}>Avatar URL</Text>
-                  <Text style={styles.profileMetaLine}>
-                    {profileData?.avatar_url || "—"}
                   </Text>
                 </>
               )}
@@ -1049,8 +1214,12 @@ export default function ChatScreen() {
                   disabled={!isValidEmail || newChatChecking}
                   onPress={() => {
                     setNewChatVisible(false);
-                    const targetEmail = newChatFound?.user_email || newChatEmail.trim();
-                    navigation.navigate("ChatWindow", { contact: targetEmail });
+                    const targetEmail =
+                      newChatFound?.user_email || newChatEmail.trim();
+                    navigation.navigate("ChatWindow", {
+                      contact: targetEmail,
+                      avatar: newChatFound?.avatar_url || undefined, // pass avatar if known
+                    });
                   }}
                 >
                   <Text style={styles.bcBtnSendTxt}>Open Chat</Text>
@@ -1068,13 +1237,34 @@ export default function ChatScreen() {
         animationType="fade"
         onRequestClose={() => setStarredModalVisible(false)}
       >
-        <Pressable style={styles.modalBackdrop} onPress={() => setStarredModalVisible(false)}>
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setStarredModalVisible(false)}
+        >
           <View />
         </Pressable>
         <View style={[styles.modalCard, { top: "18%", maxHeight: "64%" }]}>
-          <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
-            <Icon name="grade" size={18} color="#ffd54f" style={{ marginRight: 8 }} />
-            <Text style={{ color: "#e9edef", fontSize: 16, fontWeight: "700", flex: 1 }}>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              marginBottom: 8,
+            }}
+          >
+            <Icon
+              name="grade"
+              size={18}
+              color="#ffd54f"
+              style={{ marginRight: 8 }}
+            />
+            <Text
+              style={{
+                color: "#e9edef",
+                fontSize: 16,
+                fontWeight: "700",
+                flex: 1,
+              }}
+            >
               Starred Messages
             </Text>
             <TouchableOpacity onPress={() => setStarredModalVisible(false)}>
@@ -1084,7 +1274,9 @@ export default function ChatScreen() {
           {starredLoading ? (
             <ActivityIndicator color="#3a7afe" />
           ) : starredList.length === 0 ? (
-            <Text style={{ color: "#8696a0", fontSize: 12 }}>No starred messages</Text>
+            <Text style={{ color: "#e9edef", fontSize: 12 }}>
+              No starred messages
+            </Text>
           ) : (
             <FlatList
               data={starredList}
@@ -1092,7 +1284,10 @@ export default function ChatScreen() {
               style={{ maxHeight: 360, marginTop: 4 }}
               renderItem={({ item }) => {
                 const peer =
-                  item.sender_email === userEmail ? item.receiver_email : item.sender_email;
+                  item.sender_email === userEmail
+                    ? item.receiver_email
+                    : item.sender_email;
+                const peerAvatar = contactAvatars[peer];
                 return (
                   <TouchableOpacity
                     style={{
@@ -1102,16 +1297,30 @@ export default function ChatScreen() {
                     }}
                     onPress={() => {
                       setStarredModalVisible(false);
-                      navigation.navigate("ChatWindow", { contact: peer });
+                      navigation.navigate("ChatWindow", {
+                        contact: peer,
+                        avatar: peerAvatar || undefined, // pass avatar
+                      });
                     }}
                   >
-                    <Text style={{ color: "#e9edef", fontWeight: "600", fontSize: 13 }}>
+                    <Text
+                      style={{
+                        color: "#e9edef",
+                        fontWeight: "600",
+                        fontSize: 13,
+                      }}
+                    >
                       {peer}
                     </Text>
-                    <Text style={{ color: "#9aa8b3", fontSize: 12, marginTop: 2 }} numberOfLines={2}>
+                    <Text
+                      style={{ color: "#9aa8b3", fontSize: 12, marginTop: 2 }}
+                      numberOfLines={2}
+                    >
                       {item.content}
                     </Text>
-                    <Text style={{ color: "#6d7d92", fontSize: 10, marginTop: 2 }}>
+                    <Text
+                      style={{ color: "#6d7d92", fontSize: 10, marginTop: 2 }}
+                    >
                       {new Date(item.sent_at).toLocaleString()}
                     </Text>
                   </TouchableOpacity>
@@ -1345,8 +1554,29 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "600",
   },
-  profileAbout: { color: "#bbb", marginTop: 6, fontSize: 13, lineHeight: 18 },
-  profileMeta: { color: "#666", marginTop: 8, fontSize: 11 },
+  profileAbout: { color: "#fff", marginTop: 6, fontSize: 13, lineHeight: 18 },
+  profileMeta: { color: "#e9edef", marginTop: 8, fontSize: 11 }, // make meta readable on dark
+
+  // ADD: ensure profile detail texts are visible on dark bg
+  heading: {
+    marginTop: 10,
+    color: "#e9edef",
+    fontSize: 11,
+    fontWeight: "600",
+    letterSpacing: 0.5,
+  },
+  profileNameValue: {
+    color: "#e9edef",
+    fontSize: 15,
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  profileMetaLine: {
+    color: "#e9edef",
+    fontSize: 12,
+    marginTop: 2,
+  },
+
   closeModalBtn: {
     alignSelf: "flex-end",
     marginTop: 16,
@@ -1469,7 +1699,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#273642",
     marginRight: 8,
   },
-  cancelTxt: { color: "#9aa8b3", fontSize: 13, fontWeight: "500" },
+  cancelTxt: { color: "#fff", fontSize: 13, fontWeight: "500" },
   saveBtn: {
     paddingHorizontal: 20,
     paddingVertical: 10,
@@ -1477,101 +1707,18 @@ const styles = StyleSheet.create({
     backgroundColor: "#3a7afe",
   },
   saveTxt: { color: "#fff", fontSize: 13, fontWeight: "600" },
-  heading: {
-    marginTop: 10,
-    color: "#6f8294",
-    fontSize: 11,
-    fontWeight: "600",
-    letterSpacing: 0.5,
-  },
-  profileNameValue: {
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: "600",
-    marginTop: 2,
-  },
-  profileMetaLine: {
-    color: "#b9c5d1",
-    fontSize: 12,
-    marginTop: 2,
-  },
-  // ensure search input text white
-  searchRevertInput: {
-    // ...existing properties...
-    color: "#e9edef",
-  },
-  toastWrap: {
+  // NEW: small upload indicator/badge overlay on avatar when in edit mode
+  avatarUploadBadge: {
     position: "absolute",
-    left: 18,
-    right: 18,
-    bottom: 90,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    elevation: 6,
-  },
-  toastSuccess: {
-    backgroundColor: "#1d3d55",
-    borderWidth: 1,
-    borderColor: "#2e5d7d",
-  },
-  toastError: {
-    backgroundColor: "#552222",
-    borderWidth: 1,
-    borderColor: "#7d3a3a",
-  },
-  toastTxt: { color: "#fff", fontSize: 13, flexShrink: 1 },
-
-  // REPLACED broken/duplicated block with a single valid set
-  starredBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#1c2e44",
-    marginHorizontal: 12,
-    marginTop: 6,
-    marginBottom: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#27415c",
-  },
-  starredBannerTxt: {
-    color: "#d5e6ff",
-    fontSize: 11,
-    fontWeight: "500",
-  },
-  starRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#162536",
-    borderWidth: 1,
-    borderColor: "#26405a",
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    marginBottom: 8,
-  },
-  starContent: { color: "#e9edef", fontSize: 13 },
-  starMeta: { color: "#9aa8b3", fontSize: 11, marginTop: 2 },
-  unstarBtn: {
-    width: 34,
-    height: 34,
-    marginLeft: 8,
-    borderRadius: 17,
+    right: -2,
+    bottom: -2,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#3a7afe",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#273642",
+    borderWidth: 2,
+    borderColor: "#181818",
   },
-  onlineDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#28d76f",
-    marginLeft: 6,
-    marginTop: 2,
-  },
-
 });
