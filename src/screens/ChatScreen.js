@@ -23,7 +23,7 @@ import API from "../api";
 import { AuthContext } from "../AuthContext";
 import Icon from "react-native-vector-icons/MaterialIcons";
 import { useNavigation } from "@react-navigation/native";
-import { TextInput as RNTextInput } from "react-native"; // added native input
+import { TextInput as RNTextInput } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // Replace STYLE palette + UI layout
@@ -39,13 +39,33 @@ const PALETTE = {
   accentSoft: "#2b5fcc",
 };
 
-// Cloudinary config (use provided preset; set cloud name via env)
-const CLOUDINARY_UPLOAD_PRESET = "9-eTnQ576b1Eeqsnylqon1WLNwA";
+// Cloudinary config: parse EXPO_PUBLIC_CLOUDINARY_URL and derive cloud + preset
+const RAW_CLOUDINARY_URL =
+  process.env.EXPO_PUBLIC_CLOUDINARY_URL || process.env.CLOUDINARY_URL || "";
+const PARSED_CLOUDINARY = (() => {
+  try {
+    // format: cloudinary://<api_key>:<api_secret_or_preset>@<cloud_name>
+    const m = RAW_CLOUDINARY_URL.match(
+      /^cloudinary:\/\/([^:]+):([^@]+)@([^/]+)$/i
+    );
+    if (m) return { apiKey: m[1], secret: m[2], cloud: m[3] };
+  } catch {}
+  return null;
+})();
 const CLOUDINARY_CLOUD_NAME =
-  process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME || ""; // changed: detect unset
-const CLOUDINARY_API = (cloud) =>
-  `https://api.cloudinary.com/v1_1/${cloud}/image/upload`;
-// Fallback demo (if your cloud/preset is not configured server-side)
+  PARSED_CLOUDINARY?.cloud ||
+  process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME ||
+  "";
+const CLOUDINARY_API_KEY =
+  PARSED_CLOUDINARY?.apiKey || process.env.EXPO_PUBLIC_CLOUDINARY_API_KEY || "";
+const CLOUDINARY_API_SECRET = PARSED_CLOUDINARY?.secret || ""; // used for signed uploads
+const CLOUDINARY_UPLOAD_PRESET =
+  process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET ||
+  "9-eTnQ576b1Eeqsnylqon1WLNwA";
+const cloudinaryEndpoint = (cloud, mime) =>
+  `https://api.cloudinary.com/v1_1/${cloud}/${
+    (mime || "").startsWith("image/") ? "image" : "auto"
+  }/upload`;
 const CLOUDINARY_FALLBACK = {
   cloud: "demo",
   preset: "docs_upload_example_us_preset",
@@ -94,7 +114,8 @@ export default function ChatScreen() {
   const [hasProfile, setHasProfile] = useState(false); // NEW: track if my profile exists
   // NEW: new‑chat found profile (via email or userid)
   const [newChatFound, setNewChatFound] = useState(null); // { user_email, userid, ... } | null
-  const [avatarUploading, setAvatarUploading] = useState(false); // NEW: cloudinary upload state
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const avatarAttemptsRef = useRef({});
 
   // === AUTO EMAIL EXISTENCE CHECK (debounced) ===
   useEffect(() => {
@@ -363,13 +384,48 @@ export default function ChatScreen() {
     if (profileViewingEmail === userEmail) setProfileEditMode(true);
   };
 
-  // NEW: pick image from gallery and upload to Cloudinary (with robust fallback)
+  // NEW: signed upload helper (uses expo-crypto to sha1 sign)
+  const signedUpload = useCallback(async (uri, mime) => {
+    if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_API_KEY || !CLOUDINARY_API_SECRET)
+      throw new Error("Cloudinary signed upload not configured");
+    // lazy import to avoid hard dep if not installed
+    let Crypto;
+    try {
+      Crypto = await import("expo-crypto");
+    } catch {
+      throw new Error("Install expo-crypto for signed uploads");
+    }
+    const timestamp = Math.floor(Date.now() / 1000);
+    const folder = "mobile-wirewave/avatars";
+    const toSign = `folder=${folder}&timestamp=${timestamp}`;
+    const signature = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA1,
+      toSign + CLOUDINARY_API_SECRET
+    );
+    const form = new FormData();
+    form.append("file", { uri, name: "avatar", type: mime });
+    form.append("api_key", CLOUDINARY_API_KEY);
+    form.append("timestamp", String(timestamp));
+    form.append("signature", signature);
+    form.append("folder", folder);
+    const resp = await fetch(cloudinaryEndpoint(CLOUDINARY_CLOUD_NAME, mime), {
+      method: "POST",
+      body: form,
+    });
+    const json = await resp.json();
+    const url = json?.secure_url || json?.url;
+    if (!resp.ok || !url) {
+      const err = json?.error?.message || "Signed upload failed";
+      throw new Error(err);
+    }
+    return url;
+  }, []);
+
+  // NEW: pick image + upload (signed first, then unsigned fallbacks)
   const pickAndUploadAvatar = useCallback(async () => {
     if (avatarUploading) return;
     try {
       setAvatarUploading(true);
-
-      // dynamic import to avoid hard dependency when not installed
       let ImagePicker;
       try {
         ImagePicker =
@@ -379,86 +435,92 @@ export default function ChatScreen() {
         showToast("Install expo-image-picker to upload images.", "error");
         return;
       }
-
-      // permissions
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync?.();
       if (perm && perm.status !== "granted") {
         showToast("Media library permission denied.", "error");
         return;
       }
-
       const res = await ImagePicker.launchImageLibraryAsync?.({
-        mediaTypes: ImagePicker.MediaTypeOptions?.Images ?? "Images",
+        // Use new API: MediaType or array of MediaType
+        mediaTypes:
+          ImagePicker?.MediaType?.images ??
+          ImagePicker?.MediaTypeOptions?.Images ?? // fallback for older SDKs
+          "images",
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
       });
-
       if (!res || res.canceled) return;
       const asset = res.assets?.[0];
       if (!asset?.uri) {
         showToast("No image selected.", "error");
         return;
       }
-
       const uri = asset.uri;
       const mime =
         asset.mimeType ||
         (uri.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg");
 
-      const attemptUpload = async (cloud, preset) => {
+      // 1) Try signed upload when CLOUDINARY_URL provides api secret
+      try {
+        if (CLOUDINARY_API_SECRET) {
+          const url = await signedUpload(uri, mime);
+          setProfileForm((f) => ({ ...f, avatar_url: url }));
+          setProfileData((prev) => ({
+            ...(prev || {}),
+            avatar_url: url,
+            user_email: prev?.user_email || profileViewingEmail,
+          }));
+          showToast("Avatar uploaded. Save to apply.", "success");
+          return;
+        }
+      } catch {
+        // continue to unsigned attempts
+      }
+
+      // 2) Unsigned attempts with presets (env preset, provided fallback, ml_default), then demo
+      const attemptUnsigned = async (cloud, preset) => {
         const form = new FormData();
         form.append("file", { uri, name: "avatar", type: mime });
         form.append("upload_preset", preset);
-        const resp = await fetch(CLOUDINARY_API(cloud), {
+        const resp = await fetch(cloudinaryEndpoint(cloud, mime), {
           method: "POST",
           body: form,
         });
         const json = await resp.json();
         const url = json?.secure_url || json?.url;
-        if (!resp.ok || !url) {
-          const err = json?.error?.message || "Upload failed";
-          throw new Error(err);
-        }
+        if (!resp.ok || !url)
+          throw new Error(json?.error?.message || "Upload failed");
         return url;
       };
 
+      const attempts = [];
+      if (CLOUDINARY_CLOUD_NAME) {
+        if (CLOUDINARY_UPLOAD_PRESET)
+          attempts.push([CLOUDINARY_CLOUD_NAME, CLOUDINARY_UPLOAD_PRESET]);
+        attempts.push([CLOUDINARY_CLOUD_NAME, "9-eTnQ576b1Eeqsnylqon1WLNwA"]);
+        attempts.push([CLOUDINARY_CLOUD_NAME, "ml_default"]);
+      }
+      attempts.push([CLOUDINARY_FALLBACK.cloud, CLOUDINARY_FALLBACK.preset]);
+
       let url = null;
-      // Try configured cloud/preset first if provided
-      if (CLOUDINARY_CLOUD_NAME && CLOUDINARY_UPLOAD_PRESET) {
+      let lastErr = null;
+      for (const [cloud, preset] of attempts) {
         try {
-          url = await attemptUpload(
-            CLOUDINARY_CLOUD_NAME,
-            CLOUDINARY_UPLOAD_PRESET
-          );
-        } catch (e) {
-          // Always try demo fallback once on any failure
-          try {
-            url = await attemptUpload(
-              CLOUDINARY_FALLBACK.cloud,
-              CLOUDINARY_FALLBACK.preset
-            );
+          url = await attemptUnsigned(cloud, preset);
+          if (cloud === CLOUDINARY_FALLBACK.cloud) {
             showToast(
-              "Uploaded via Cloudinary demo. Configure your cloud for production.",
+              "Uploaded via Cloudinary demo. Configure your cloud.",
               "success"
             );
-          } catch (e2) {
-            throw e2;
           }
+          break;
+        } catch (e) {
+          lastErr = e;
         }
-      } else {
-        // no cloud configured: use demo directly
-        url = await attemptUpload(
-          CLOUDINARY_FALLBACK.cloud,
-          CLOUDINARY_FALLBACK.preset
-        );
-        showToast(
-          "Using Cloudinary demo. Set EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME to use your preset.",
-          "success"
-        );
       }
+      if (!url) throw lastErr || new Error("Upload failed");
 
-      // set into form for saveMyProfile payload; update preview
       setProfileForm((f) => ({ ...f, avatar_url: url }));
       setProfileData((prev) => ({
         ...(prev || {}),
@@ -467,11 +529,12 @@ export default function ChatScreen() {
       }));
       showToast("Avatar uploaded. Save to apply.", "success");
     } catch (e) {
-      showToast(e?.message || "Upload failed", "error");
+      const msg = String(e?.message || "Upload failed");
+      showToast(msg, "error");
     } finally {
       setAvatarUploading(false);
     }
-  }, [avatarUploading, profileViewingEmail, showToast]);
+  }, [avatarUploading, profileViewingEmail, showToast, signedUpload]);
 
   const saveMyProfile = useCallback(async () => {
     if (profileViewingEmail !== userEmail) return;
@@ -573,37 +636,47 @@ export default function ChatScreen() {
     })();
   }, [userEmail, authHdr]); // CHANGED dep
 
-  // Fetch avatars for contacts (simple incremental)
+  // Fetch avatars for contacts (incremental with limited retries on failures)
   useEffect(() => {
     const toFetch = contacts
       .map((c) => c.email)
-      .filter((e) => contactAvatars[e] === undefined);
+      .filter((email) => {
+        const v = contactAvatars[email];
+        const attempts = avatarAttemptsRef.current[email] || 0;
+        return v === undefined || (v === null && attempts < 2);
+      });
     if (!toFetch.length) return;
     let cancelled = false;
     (async () => {
       for (const email of toFetch) {
+        avatarAttemptsRef.current[email] =
+          (avatarAttemptsRef.current[email] || 0) + 1;
         try {
           const { data } = await API.get(
             `/users/search?email=${encodeURIComponent(email)}`,
-            { headers: authHdr } // CHANGED
+            { headers: authHdr }
           );
           if (!cancelled) {
-            setContactAvatars((prev) => ({
-              ...prev,
-              [email]: data?.avatar_url || null,
-            }));
+            const urlRaw =
+              data?.avatar_url ||
+              data?.avatar ||
+              data?.profile?.avatar_url ||
+              "";
+            const url = urlRaw
+              ? String(urlRaw).replace(/^http:\/\//, "https://")
+              : null;
+            setContactAvatars((prev) => ({ ...prev, [email]: url || null }));
           }
         } catch {
-          if (!cancelled) {
+          if (!cancelled)
             setContactAvatars((prev) => ({ ...prev, [email]: null }));
-          }
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [contacts, contactAvatars, authHdr]); // CHANGED dep
+  }, [contacts, contactAvatars, authHdr]);
 
   const showToast = useCallback((msg, type = "success", duration = 2800) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -1019,7 +1092,7 @@ export default function ChatScreen() {
           ) : (
             <>
               <View style={styles.profileHeaderRow}>
-                {/* CHANGED: always show avatar; tap to upload in edit mode */}
+                {/* FIX: only use form avatar for my own profile; others use profileData */}
                 <TouchableOpacity
                   activeOpacity={0.85}
                   style={styles.profileAvatarWrap}
@@ -1030,8 +1103,12 @@ export default function ChatScreen() {
                   onPress={pickAndUploadAvatar}
                 >
                   {(() => {
-                    const previewUrl =
-                      profileForm.avatar_url || profileData?.avatar_url || null;
+                    const isMe = profileViewingEmail === userEmail;
+                    const previewUrl = isMe
+                      ? profileForm.avatar_url ||
+                        profileData?.avatar_url ||
+                        null
+                      : profileData?.avatar_url || null;
                     if (previewUrl) {
                       return (
                         <Image
@@ -1545,7 +1622,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 18,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#2a2a2a",
+    borderColor: "#2a22a2",
   },
   profileEmail: { color: "#fff", fontSize: 16, fontWeight: "600" },
   profileName: {
