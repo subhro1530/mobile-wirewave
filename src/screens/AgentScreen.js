@@ -17,6 +17,7 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  Animated, // NEW: animations
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Icon from "react-native-vector-icons/MaterialIcons";
@@ -68,6 +69,7 @@ export default function AgentScreen() {
   const pendingRef = useRef(null); // { email, message }
   const draftRef = useRef({ email: "", message: "" }); // NEW: slot-filling draft
   const lastSentRef = useRef(null); // NEW: for "send again"
+  const typingRef = useRef({ id: null, timer: null, progress: 0, base: "" }); // NEW: typing indicator state
 
   useEffect(() => {
     (async () => {
@@ -95,27 +97,72 @@ export default function AgentScreen() {
     })();
   }, []);
 
-  const append = (role, text, extra = {}) =>
+  const append = (role, text, extra = {}) => {
+    // NEW: remove typing indicator automatically before agent replies
+    if (role === "agent" && typingRef.current?.id) {
+      stopTypingTimer();
+      setItems((prev) => prev.filter((it) => it.id !== typingRef.current.id));
+      typingRef.current = { id: null, timer: null, progress: 0, base: "" };
+    }
     setItems((p) => [
       ...p,
       { id: String(Date.now()) + Math.random(), role, text, ...extra },
     ]);
+  };
 
-  // --- NEW: voice-style speaker (optional, best effort) ---
-  const speakOut = useCallback(async (text) => {
-    try {
-      const mod = await import("expo-speech");
-      const Speech = mod?.default ?? mod;
-      if (Speech?.speak) {
-        Speech.speak(text, {
-          language: "en-US",
-          pitch: 1.0,
-          rate: 1.0,
-        });
-      }
-    } catch {
-      // no-op if expo-speech not installed
+  // --- NEW: dynamic typing indicator state/helpers ---
+  const stopTypingTimer = () => {
+    if (typingRef.current.timer) {
+      clearInterval(typingRef.current.timer);
+      typingRef.current.timer = null;
     }
+  };
+  const startTyping = useCallback(
+    (baseLabel = "AI is composing a witty reply") => {
+      if (typingRef.current.id) return; // already typing
+      const id = "typing-" + Date.now();
+      typingRef.current = { id, timer: null, progress: 0, base: baseLabel };
+
+      setItems((prev) => [
+        ...prev,
+        {
+          id,
+          role: "agent",
+          text: `${baseLabel}… 0%`,
+          typing: true,
+          progress: 0,
+        },
+      ]);
+
+      const timer = setInterval(() => {
+        const next = Math.min(
+          95,
+          typingRef.current.progress + Math.ceil(Math.random() * 7)
+        );
+        typingRef.current.progress = next;
+        setItems((prev) =>
+          prev.map((it) =>
+            it.id === id
+              ? {
+                  ...it,
+                  text: `${typingRef.current.base}… ${next}%`,
+                  progress: next,
+                }
+              : it
+          )
+        );
+      }, 350);
+      typingRef.current.timer = timer;
+    },
+    []
+  );
+
+  const hideTyping = useCallback(() => {
+    if (!typingRef.current.id) return;
+    stopTypingTimer();
+    const id = typingRef.current.id;
+    setItems((prev) => prev.filter((it) => it.id !== id));
+    typingRef.current = { id: null, timer: null, progress: 0, base: "" };
   }, []);
 
   async function parseWithGemini(text) {
@@ -559,49 +606,118 @@ ${JSON.stringify(messages.slice(0, 20))}`;
   // Transcribe local audio URI with Hugging Face Inference API (Whisper)
   const transcribeAudio = useCallback(
     async (uri) => {
-      try {
-        if (!hfToken) {
-          append("agent", "ASR not configured (missing Hugging Face token).");
-          return "";
+      // helper: small sleep
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+      // helper: try backend fallback endpoints with multipart/form-data
+      const tryBackendFallback = async () => {
+        const fileType = mimeFromUri(uri);
+        const name =
+          "recording" +
+          (fileType && fileType.includes("/")
+            ? "." + fileType.split("/")[1]
+            : ".m4a");
+
+        const form = new FormData();
+        form.append("file", {
+          uri,
+          name,
+          type: fileType || "application/octet-stream",
+        });
+
+        const eps = ["/ai/transcribe", "/ai/asr", "/asr", "/stt/transcribe"];
+        for (const ep of eps) {
+          try {
+            const { data } = await API.post(ep, form, {
+              headers: {
+                ...(authHdr || {}),
+                "Content-Type": "multipart/form-data",
+              },
+            });
+            const out =
+              data?.text ||
+              data?.transcript ||
+              data?.transcription ||
+              data?.result ||
+              "";
+            if (out) return String(out).trim();
+          } catch {}
         }
+        return "";
+      };
+
+      try {
+        // If no HF token, try backend; do not error at user level
+        if (!hfToken) {
+          const fb = await tryBackendFallback();
+          if (!fb)
+            append("agent", "Couldn’t transcribe audio (no ASR configured).");
+          return fb || "";
+        }
+
+        // Primary: HF Inference Whisper
         const audioResp = await fetch(uri);
         const blob = await audioResp.blob();
         const contentType = mimeFromUri(uri);
 
-        const resp = await fetch(
-          "https://api-inference.huggingface.co/models/openai/whisper-large-v3",
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${hfToken}`,
-              Accept: "application/json",
-              "Content-Type": contentType, // CHANGED: force audio content-type
-            },
-            body: blob,
-          }
-        );
-
-        if (!resp.ok) {
-          const errTxt = await resp.text();
-          throw new Error(
-            `ASR ${resp.status}: ${errTxt?.slice(0, 200) || "Unknown error"}`
+        let tries = 0;
+        while (tries < 2) {
+          const resp = await fetch(
+            "https://api-inference.huggingface.co/models/openai/whisper-large-v3",
+            {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${hfToken}`,
+                Accept: "application/json",
+                "Content-Type": contentType || "application/octet-stream",
+              },
+              body: blob,
+            }
           );
+
+          if (resp.status === 503) {
+            // Model warming up; wait and retry once
+            let waitMs = 1500;
+            try {
+              const j = await resp.json();
+              if (j?.estimated_time)
+                waitMs = Math.ceil(j.estimated_time * 1000);
+            } catch {}
+            tries += 1;
+            await sleep(Math.min(6000, waitMs || 1500));
+            continue;
+          }
+
+          if (!resp.ok) {
+            // As a fallback, try backend
+            const fb = await tryBackendFallback();
+            if (fb) return fb;
+            const errTxt = await resp.text();
+            throw new Error(
+              `ASR ${resp.status}: ${errTxt?.slice(0, 200) || "Unknown error"}`
+            );
+          }
+
+          const json = await resp.json();
+          const text = (
+            typeof json === "string"
+              ? json
+              : json?.text || json?.generated_text || ""
+          )
+            .toString()
+            .trim();
+          return text;
         }
-        const json = await resp.json();
-        const text = (
-          typeof json === "string"
-            ? json
-            : json?.text || json?.generated_text || ""
-        )
-          .toString()
-          .trim();
-        return text;
+
+        // If we got here, warmup didn’t resolve; fallback to backend
+        const fb = await tryBackendFallback();
+        return fb || "";
       } catch (e) {
         append("agent", `ASR error: ${e?.message || "transcription failed"}`);
         return "";
       }
     },
-    [hfToken, append]
+    [hfToken, append, authHdr]
   );
 
   // NEW: load a Recording-capable Audio API (prefer expo-audio, fallback expo-av)
@@ -721,6 +837,8 @@ ${JSON.stringify(messages.slice(0, 20))}`;
     append("user", q);
     setInput("");
     setBusy(true);
+    // NEW: show live typing indicator while we work
+    startTyping("AI is composing a witty reply");
 
     try {
       // NEW: "send again" / "resend" support using last-sent
@@ -840,34 +958,9 @@ ${JSON.stringify(messages.slice(0, 20))}`;
       );
     } finally {
       setBusy(false);
+      // Ensure typing is removed if nothing else removed it
+      hideTyping();
     }
-  };
-
-  const renderItem = ({ item }) => {
-    const isAgent = item.role === "agent";
-    const bubbleStyle = isAgent ? styles.agentBubble : styles.userBubble;
-    return (
-      <View style={styles.row}>
-        <View style={[styles.bubble, bubbleStyle]}>
-          <Text style={styles.text}>{item.text}</Text>
-          {item.action?.type === "openChat" && (
-            <TouchableOpacity
-              style={styles.cta}
-              onPress={() =>
-                navigation.navigate("ChatWindow", {
-                  contact: item.action.email,
-                })
-              }
-            >
-              <Icon name="open-in-new" size={16} color="#fff" />
-              <Text style={styles.ctaTxt}>
-                Open chat with {item.action.email}
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
-    );
   };
 
   // Remove header title; add top space via padding only
@@ -904,6 +997,78 @@ ${JSON.stringify(messages.slice(0, 20))}`;
     ]);
   }, []);
 
+  // NEW: animated message row for subtle motion and typing indicator visuals
+  const MessageRow = React.memo(({ item }) => {
+    const isAgent = item.role === "agent";
+    const opacity = React.useRef(new Animated.Value(0)).current;
+    const translateY = React.useRef(new Animated.Value(8)).current;
+    const translateX = React.useRef(
+      new Animated.Value(isAgent ? -8 : 8)
+    ).current;
+    const scale = opacity.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0.98, 1],
+    });
+
+    useEffect(() => {
+      Animated.parallel([
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 220,
+          useNativeDriver: true,
+        }),
+        Animated.spring(translateY, {
+          toValue: 0,
+          friction: 6,
+          tension: 60,
+          useNativeDriver: true,
+        }),
+        Animated.timing(translateX, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }, [opacity, translateY, translateX]);
+
+    const bubbleStyle = isAgent ? styles.agentBubble : styles.userBubble;
+
+    return (
+      <Animated.View
+        style={[
+          styles.row,
+          { opacity, transform: [{ translateY }, { translateX }, { scale }] },
+        ]}
+      >
+        <View style={[styles.bubble, bubbleStyle]}>
+          {item.typing ? (
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <ActivityIndicator color="#9ab1c1" size="small" />
+              <Text style={[styles.text, { marginLeft: 8 }]}>{item.text}</Text>
+            </View>
+          ) : (
+            <Text style={styles.text}>{item.text}</Text>
+          )}
+          {item.action?.type === "openChat" && (
+            <TouchableOpacity
+              style={styles.cta}
+              onPress={() =>
+                navigation.navigate("ChatWindow", {
+                  contact: item.action.email,
+                })
+              }
+            >
+              <Icon name="open-in-new" size={16} color="#fff" />
+              <Text style={styles.ctaTxt}>
+                Open chat with {item.action.email}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </Animated.View>
+    );
+  });
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: "#0b141a" }}
@@ -926,7 +1091,8 @@ ${JSON.stringify(messages.slice(0, 20))}`;
             paddingHorizontal: 14,
             paddingBottom: 8, // composer is in-flow
           }}
-          renderItem={renderItem}
+          // NEW: animated row renderer
+          renderItem={({ item }) => <MessageRow item={item} />}
           keyboardShouldPersistTaps="handled"
         />
       </View>
