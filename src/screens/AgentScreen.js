@@ -66,11 +66,22 @@ export default function AgentScreen() {
   const [rec, setRec] = useState(null); // NEW: recording handle
   const [recBusy, setRecBusy] = useState(false); // NEW
   const pendingRef = useRef(null); // { email, message }
+  const draftRef = useRef({ email: "", message: "" }); // NEW: slot-filling draft
+  const lastSentRef = useRef(null); // NEW: for "send again"
 
   useEffect(() => {
     (async () => {
       const saved = await AsyncStorage.getItem("agent:lastEmail");
       if (saved) setLastEmail(saved);
+      // NEW: load draft and last-sent buffers
+      try {
+        const d = await AsyncStorage.getItem("agent:draft");
+        if (d) draftRef.current = JSON.parse(d);
+      } catch {}
+      try {
+        const ls = await AsyncStorage.getItem("agent:lastSent");
+        if (ls) lastSentRef.current = JSON.parse(ls);
+      } catch {}
     })();
   }, []);
 
@@ -182,7 +193,7 @@ export default function AgentScreen() {
 
     // Email: first email-like token anywhere
     const emailMatch = src.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
-    const email = (emailMatch?.[0] || "")
+    let email = (emailMatch?.[0] || "")
       .replace(/^[<("'\[\s]+/, "")
       .replace(/[>)"'\]\s.,;:]+$/, "");
 
@@ -206,6 +217,30 @@ export default function AgentScreen() {
     if (!message) {
       const quotedThenTo = src.match(/send\s+["“”'](.+?)["“”']\s+to\s+[^\s]+/i);
       if (quotedThenTo) message = quotedThenTo[1].trim();
+    }
+
+    // NEW: handle "send (a message) to <email> <message>"
+    if ((!message || !email) && /\bsend\b/i.test(src)) {
+      const m2 = src.match(
+        /\bsend(?:\s+a\s+message)?(?:\s+to)?\s+([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})\s+(.+)/i
+      );
+      if (m2) {
+        email =
+          email ||
+          m2[1].replace(/^[<("'\[\s]+/, "").replace(/[>)"'\]\s.,;:]+$/, "");
+        message = message || m2[2].trim();
+      }
+    }
+
+    // NEW: if email found and trailing text after first occurrence looks like message
+    if (!message && emailMatch?.[0]) {
+      const after = src.split(emailMatch[0])[1];
+      if (after) {
+        const cleaned = after
+          .replace(/^\s*(named|saying|message:|content:|titled)\s*/i, "")
+          .trim();
+        if (cleaned) message = cleaned;
+      }
     }
 
     const confirm = /\b(send now|yes|confirm|go ahead|proceed)\b/i.test(src);
@@ -433,6 +468,38 @@ ${JSON.stringify(messages.slice(0, 20))}`;
     speakOut(summary); // optional voice output
   }
 
+  // --- helpers for slot-filling & resend ---
+  const isEmail = (s = "") =>
+    /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(String(s).trim());
+  const extractEmail = (s = "") => {
+    const m = String(s || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+    return m
+      ? m[0].replace(/^[<("'\[\s]+/, "").replace(/[>)"'\]\s.,;:]+$/, "")
+      : "";
+  };
+  const saveDraft = useCallback(async (draft) => {
+    draftRef.current = draft;
+    try {
+      await AsyncStorage.setItem(
+        "agent:draft",
+        JSON.stringify({ ...draft, at: Date.now() })
+      );
+    } catch {}
+  }, []);
+  const clearDraft = useCallback(async () => {
+    draftRef.current = { email: "", message: "" };
+    try {
+      await AsyncStorage.removeItem("agent:draft");
+    } catch {}
+  }, []);
+  const saveLastSent = useCallback(async (email, message) => {
+    const payload = { email, message, at: Date.now() };
+    lastSentRef.current = payload;
+    try {
+      await AsyncStorage.setItem("agent:lastSent", JSON.stringify(payload));
+    } catch {}
+  }, []);
+
   async function confirmAndSend(email, message) {
     setSending(true);
     try {
@@ -442,6 +509,9 @@ ${JSON.stringify(messages.slice(0, 20))}`;
         { headers: authHdr }
       );
       await AsyncStorage.setItem("agent:lastEmail", email);
+      // NEW: persist last-sent and clear draft
+      await saveLastSent(email, message);
+      await clearDraft();
       // NEW: wipe transient parse snapshot after a successful send
       try {
         await AsyncStorage.removeItem("agent:lastParsed");
@@ -653,7 +723,29 @@ ${JSON.stringify(messages.slice(0, 20))}`;
     setBusy(true);
 
     try {
-      // NEW: resolve pending confirmations first (prevents wrong intent routing)
+      // NEW: "send again" / "resend" support using last-sent
+      if (
+        /\bsend (the )?message again\b/i.test(q) ||
+        /\bresend\b/i.test(q) ||
+        /\bsend again\b/i.test(q)
+      ) {
+        const last = lastSentRef.current;
+        if (last?.email && last?.message) {
+          append(
+            "agent",
+            `Resending last message to ${last.email}: "${last.message}"`
+          );
+          await confirmAndSend(last.email, last.message);
+        } else {
+          append(
+            "agent",
+            "I don’t have a recent message to resend. Try sending one first."
+          );
+        }
+        return;
+      }
+
+      // Pending confirmation first
       if (pendingRef.current) {
         if (/\b(yes|y|send|confirm|go ahead|proceed)\b/i.test(q)) {
           const { email, message } = pendingRef.current;
@@ -661,7 +753,6 @@ ${JSON.stringify(messages.slice(0, 20))}`;
         } else {
           append("agent", "Okay, cancelled. Start again anytime.");
           pendingRef.current = null;
-          // NEW: clear transient parse snapshot on cancel
           try {
             await AsyncStorage.removeItem("agent:lastParsed");
           } catch {}
@@ -669,9 +760,11 @@ ${JSON.stringify(messages.slice(0, 20))}`;
         return;
       }
 
-      // NEW: prefer send-like intents over list
+      // Prefer send-like intents over list (unless we’re slot-filling)
       const isSendLike =
         /\b(send|message|mail|text|deliver|forward|post)\b/i.test(q);
+
+      // If not a send-like request, try list intent
       if (!isSendLike) {
         const listParse = await parseListWithGemini(q);
         if (listParse.intent === "list" || isListIntent(q)) {
@@ -684,36 +777,66 @@ ${JSON.stringify(messages.slice(0, 20))}`;
         }
       }
 
-      // Parse intent for direct send
+      // Parse intent for direct send and combine with slot-filling draft
       let { email, message, confirm } = await parseWithGemini(q);
 
-      // Use last email if missing
-      if (!email && lastEmail) email = lastEmail;
+      const draft = { ...draftRef.current };
 
-      // CHANGED: stop persisting lastParsed to avoid stale intent confusion
-      // try {
-      //   await AsyncStorage.setItem(
-      //     "agent:lastParsed",
-      //     JSON.stringify({ email, message, confirm, at: Date.now() })
-      //   );
-      // } catch {}
+      // Merge parsed results into draft
+      if (!draft.email && email) draft.email = email;
+      if (!draft.message && message) draft.message = message;
 
-      if (!email) {
-        append("agent", "email is missing");
+      // If none parsed: try to extract email or treat as message (if not a command)
+      if (!draft.email && !email) {
+        const e = extractEmail(q);
+        if (e) draft.email = e;
+      }
+      if (!draft.message && !message) {
+        const looksLikeCommand =
+          /\b(send|message|list|show|again|resend)\b/i.test(q);
+        if (!looksLikeCommand && !isEmail(q)) {
+          draft.message = q;
+        }
+      }
+
+      // Backfill with lastEmail only if the user already gave a message
+      if (!draft.email && draft.message && lastEmail) {
+        draft.email = lastEmail;
+      }
+
+      // Persist draft until sent
+      await saveDraft({
+        email: draft.email || "",
+        message: draft.message || "",
+      });
+
+      // Ask for missing pieces humanly
+      if (!draft.email && !draft.message) {
+        append(
+          "agent",
+          "Sure — who should I send it to? Please provide the recipient email."
+        );
         return;
       }
-      if (!message) {
-        append("agent", "message is missing");
+      if (!draft.email) {
+        append("agent", "Got it. What is the recipient email address?");
         return;
       }
-      if (confirm) {
-        await confirmAndSend(email, message);
+      if (!draft.message) {
+        append("agent", "What should I say in the message?");
         return;
       }
-      pendingRef.current = { email, message };
+
+      // We have both email and message
+      if (confirm || /\bsend now\b/i.test(q)) {
+        await confirmAndSend(draft.email, draft.message);
+        return;
+      }
+
+      pendingRef.current = { email: draft.email, message: draft.message };
       append(
         "agent",
-        `Do you want to send this now?\nTo: ${email}\nMessage: "${message}"\nReply "yes" to confirm or anything else to cancel.`
+        `Do you want to send this now?\nTo: ${draft.email}\nMessage: "${draft.message}"\nReply "yes" to confirm or anything else to cancel.`
       );
     } finally {
       setBusy(false);
@@ -761,9 +884,13 @@ ${JSON.stringify(messages.slice(0, 20))}`;
         "agent:lastParsed",
         "agent:lastEmail",
         "agent:profile",
+        "agent:draft", // NEW
+        "agent:lastSent", // NEW
       ]);
     } catch {}
     pendingRef.current = null;
+    draftRef.current = { email: "", message: "" }; // NEW
+    lastSentRef.current = null; // NEW
     setInput("");
     setLastEmail("");
     setBusy(false);
